@@ -1,0 +1,75 @@
+/**
+ * Pure driver helpers. The parts that need a browser are covered by running
+ * `plan` against the live sites (see README) — a unit test cannot meaningfully
+ * stand in for Cloudflare Turnstile or a React checkout.
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import chuffed, { parseMoney } from '../src/drivers/chuffed.js';
+import gofundme, { donateUrl, formatExpiry, parseAmount, parseRaised, splitName } from '../src/drivers/gofundme.js';
+import { formatExpiry as stripeExpiry } from '../src/drivers/stripe.js';
+import { driverFor, driverById } from '../src/drivers/index.js';
+
+test('driverFor picks a driver by campaign host', () => {
+  assert.equal(driverFor('https://www.chuffed.org/project/x'), chuffed);
+  assert.equal(driverFor('https://chuffed.org/project/x'), chuffed);
+  assert.equal(driverFor('https://www.gofundme.com/f/x'), gofundme);
+  assert.equal(driverFor('https://whydonate.com/fundraising/x'), null);
+  assert.equal(driverFor(null), null);
+  assert.equal(driverById('chuffed'), chuffed);
+  assert.equal(driverById('nope'), null);
+});
+
+test('every driver implements the interface the payment loop calls', () => {
+  for (const driver of [chuffed, gofundme]) {
+    for (const method of ['inspect', 'prepare', 'waitForConfirmation']) {
+      assert.equal(typeof driver[method], 'function', `${driver.id}.${method}`);
+    }
+  }
+});
+
+test('parseMoney reads Chuffed raised figures', () => {
+  assert.equal(parseMoney('$3,439'), 3439);
+  assert.equal(parseMoney('$1,234.56'), 1234.56);
+  assert.equal(parseMoney('Raised of $10,000'), 10000);
+  assert.equal(parseMoney(''), null);
+  assert.equal(parseMoney(null), null);
+});
+
+test('donateUrl points at the GoFundMe checkout and drops tracking parameters', () => {
+  assert.equal(
+    donateUrl('https://www.gofundme.com/f/help-a-family'),
+    'https://www.gofundme.com/f/help-a-family/donate',
+  );
+  assert.equal(
+    donateUrl('https://www.gofundme.com/f/help-a-family/?utm_source=mastodon#top'),
+    'https://www.gofundme.com/f/help-a-family/donate',
+  );
+});
+
+test('parseRaised reads the GoFundMe progress line', () => {
+  assert.equal(parseRaised('$6,909 raised of $20,000 goal'), 6909);
+  assert.equal(parseRaised('$12.5K raised of $50K goal'), 12500);
+  assert.equal(parseRaised('no numbers here'), null);
+});
+
+test('parseAmount compares a formatted amount field on its number', () => {
+  assert.equal(parseAmount('10'), 10);
+  assert.equal(parseAmount('$10.00'), 10);
+  assert.equal(parseAmount('1,250.50'), 1250.5);
+  assert.equal(parseAmount(''), null);
+  assert.equal(parseAmount(null), null);
+});
+
+test('expiry is formatted the way each site expects it', () => {
+  const card = { expMonth: 3, expYear: 2030 };
+  assert.equal(formatExpiry(card), '03/30', 'GoFundMe uses a separator');
+  assert.equal(stripeExpiry(card), '0330', 'Stripe fields insert their own');
+});
+
+test('splitName fills both GoFundMe name fields', () => {
+  assert.deepEqual(splitName('Amina Haddad'), { firstName: 'Amina', lastName: 'Haddad' });
+  assert.deepEqual(splitName('Jean Luc  Picard'), { firstName: 'Jean', lastName: 'Luc Picard' });
+  assert.deepEqual(splitName('Prince'), { firstName: 'Prince', lastName: 'Prince' });
+  assert.deepEqual(splitName(''), { firstName: '', lastName: '' });
+});

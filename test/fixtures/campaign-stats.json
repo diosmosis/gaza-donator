@@ -1,0 +1,238 @@
+{
+ "group_key": [],
+ "group_value": [],
+ "data": [
+  {
+   "group_key": [
+    "account.url"
+   ],
+   "group_value": [
+    "https://ieji.de/@DiaaMahmoud097"
+   ],
+   "data": [],
+   "state": "ACTIVE",
+   "account": {
+    "url": "https://ieji.de/@DiaaMahmoud097",
+    "id": "116215358133900592",
+    "display_name": "𓂆✊🇵🇸 Diaa-Ayyad 97",
+    "avatar_url": "https://ftp.ieji.de/accounts/avatars/116/215/358/133/900/592/original/f2a8a0c86287f706.jpg",
+    "header_url": "https://ftp.ieji.de/accounts/headers/116/215/358/133/900/592/original/14fdb9c4553da70e.jpg",
+    "profile_note": "<p>Diyaa | 28 | <a href=\"https://ieji.de/tags/Gaza\" class=\"mention hashtag\" rel=\"tag\">#<span>Gaza</span></a> 🇵🇸<br />I swear I am not a scammer. I am just a person trying to survive under very difficult conditions. If you want to verify me, you can ask me anything. 🙏<br />There are 9 people relying on this fundraiser to survive. 👨‍👩‍👧‍👦<br />Please consider donating or sharing the campaign:</p><p><a href=\"https://chuffed.org/project/193219-support-diyaa-after-devastating-injury\" target=\"_blank\" rel=\"nofollow noopener\" translate=\"no\"><span class=\"invisible\">https://</span><span class=\"ellipsis\">chuffed.org/project/193219-sup</span><span class=\"invisible\">port-diyaa-after-devastating-injury</span></a><br />✅Verified by<br /><a href=\"https://lifeline4gaza.com/share/1142\" target=\"_blank\" rel=\"nofollow noopener\" translate=\"no\"><span class=\"invisible\">https://</span><span class=\"\">lifeline4gaza.com/share/1142</span><span class=\"invisible\"></span></a> 🤍<br />✅Verified by <a href=\"https://ieji.de/tags/GazaVerified\" class=\"mention hashtag\" rel=\"tag\">#<span>GazaVerified</span></a><br /><a href=\"https://gaza-verified.org/people/@DiaaMahmoud097@ieji.de/\" target=\"_blank\" rel=\"nofollow noopener\" translate=\"no\"><span class=\"invisible\">https://</span><span class=\"ellipsis\">gaza-verified.org/people/@Diaa</span><span class=\"invisible\">Mahmoud097@ieji.de/</span></a></p>",
+    "profile_fields": {
+     "Gaza Verified": "https://gaza-verified.org/people/@DiaaMahmoud097@ieji.de/",
+     "lifeline4gaza": "https://lifeline4gaza.com/share/1142",
+     "WhatsApp:": "https://wa.me/qr/ANYOMB7422GRB1"
+    },
+    "disabled": false,
+    "campaign_url": "https://www.chuffed.org/project/193219-support-diyaa-after-devastating-injury",
+    "last_status_id": "117059682332333712",
+    "created_at": "2026-03-12T00:00:00",
+    "instance_down_since": null,
+    "source_removed_since": null,
+    "state": "ACTIVE",
+    "username": "DiaaMahmoud097",
+    "feed_url": "https://ieji.de/@DiaaMahmoud097.rss",
+    "instance": "ieji.de",
+    "instance_url": "https://ieji.de",
+    "fqn": "@DiaaMahmoud097@ieji.de",
+    "api_url": "https://ieji.de/api/v1/accounts/116215358133900592",
+    "avatar_path": "/media/@DiaaMahmoud097@ieji.de/avatars/f2a8a0c86287f706.jpg",
+    "header_path": "/media/@DiaaMahmoud097@ieji.de/headers/14fdb9c4553da70e.jpg"
+   },
+   "amount": {
+    "amount": 0,
+    "currency": "USD",
+    "string": "$0.00"
+   },
+   "first_donation_time": null,
+   "last_donation_time": null,
+   "last_activity_time": "2026-08-06T09:00:29"
+  },
+  {
+   "group_key": [
+    "account.url"
+   ],
+   "group_value": [
+    "https://autonomous.zone/@ahmadallouh32"
+   ],
+   "data": [],
+   "state": "ACTIVE",
+   "account": {
+    "url": "https://autonomous.zone/@ahmadallouh32",
+    "id": "115311657263369802",
+    "display_name": "ahmadallouh32",
+    "avatar_url": "https://autonomous.zone/system/accounts/avatars/115/311/657/263/369/802/original/f5983e52be04c13e.jpg",
+    "header_url": "https://autonomous.zone/system/accounts/headers/115/311/657/263/369/802/original/ace2fdc4ef6fc015.jpg",
+    "profile_note": "<p>I am Ahmed Allouh &quot;احمد اللوح&quot; from Gaza. I lost my brother, my home and most of my relatives. We have nothing left. Please help save us<br /><a href=\"https://gofund.me/870ecb5e5\" target=\"_blank\" rel=\"nofollow noopener\" translate=\"no\"><span class=\"invisible\">https://</span><span class=\"\">gofund.me/870ecb5e5</span><span class=\"invisible\"></span></a></p>",
+    "profile_fields": {
+     "Gaza Verified": "https://gaza-verified.org/people/@ahmadallouh32@autonomous.zone/"
+    },
+    "disabled": false,
+    "campaign_url": "https://www.gofundme.com/f/save-ahmeds-family-evacuation-medical-aid",
+    "last_status_id": "117010216979935603",
+    "created_at": "2025-10-03T00:00:00",
+    "instance_down_since": null,
+    "source_removed_since": null,
+    "state": "ACTIVE",
+    "username": "ahmadallouh32",
+    "feed_url": "https://autonomous.zone/@ahmadallouh32.rss",
+    "instance": "autonomous.zone",
+    "instance_url": "https://autonomous.zone",
+    "fqn": "@ahmadallouh32@autonomous.zone",
+    "api_url": "https://autonomous.zone/api/v1/accounts/115311657263369802",
+    "avatar_path": "/media/@ahmadallouh32@autonomous.zone/avatars/f5983e52be04c13e.jpg",
+    "header_path": "/media/@ahmadallouh32@autonomous.zone/headers/ace2fdc4ef6fc015.jpg"
+   },
+   "amount": {
+    "amount": 45.5,
+    "currency": "USD",
+    "string": "$45.50"
+   },
+   "first_donation_time": "2026-08-07T11:00:00",
+   "last_donation_time": "2026-08-07T11:00:00",
+   "last_activity_time": "2026-08-07T11:00:00"
+  },
+  {
+   "group_key": [
+    "account.url"
+   ],
+   "group_value": [
+    "https://freesewing.social/@Kahlout94"
+   ],
+   "data": [],
+   "state": "ACTIVE",
+   "account": {
+    "url": "https://freesewing.social/@Kahlout94",
+    "id": "115600448097481656",
+    "display_name": "Dr mohammed kahlout",
+    "avatar_url": "https://freesewing-social.s3.de.io.cloud.ovh.net/accounts/avatars/115/600/448/097/481/656/original/41bc4988c2da066c.jpg",
+    "header_url": "https://freesewing-social.s3.de.io.cloud.ovh.net/accounts/headers/115/600/448/097/481/656/original/de7be9ac50fd10e2.jpg",
+    "profile_note": "",
+    "profile_fields": {
+     "Gaza verified": "https://gaza-verified.org/people/@Kahlout94@freesewing.social/"
+    },
+    "disabled": false,
+    "campaign_url": null,
+    "last_status_id": null,
+    "created_at": "2025-11-23T00:00:00",
+    "instance_down_since": null,
+    "source_removed_since": null,
+    "state": "ACTIVE",
+    "username": "Kahlout94",
+    "feed_url": "https://freesewing.social/@Kahlout94.rss",
+    "instance": "freesewing.social",
+    "instance_url": "https://freesewing.social",
+    "fqn": "@Kahlout94@freesewing.social",
+    "api_url": "https://freesewing.social/api/v1/accounts/115600448097481656",
+    "avatar_path": "/media/@Kahlout94@freesewing.social/avatars/41bc4988c2da066c.jpg",
+    "header_path": "/media/@Kahlout94@freesewing.social/headers/de7be9ac50fd10e2.jpg"
+   },
+   "amount": {
+    "amount": 0,
+    "currency": "USD",
+    "string": "$0.00"
+   },
+   "first_donation_time": null,
+   "last_donation_time": null,
+   "last_activity_time": "2026-08-01T00:00:00"
+  },
+  {
+   "group_key": [
+    "account.url"
+   ],
+   "group_value": [
+    "https://freesewing.social/@Rania"
+   ],
+   "data": [],
+   "state": "ACTIVE",
+   "account": {
+    "url": "https://freesewing.social/@Rania",
+    "id": "115311482808831682",
+    "display_name": "Rania rizq",
+    "avatar_url": "https://freesewing-social.s3.de.io.cloud.ovh.net/accounts/avatars/115/311/482/808/831/682/original/73f558503dd5baa1.jpg",
+    "header_url": "https://freesewing-social.s3.de.io.cloud.ovh.net/accounts/headers/115/311/482/808/831/682/original/d73da349cbfe25b9.jpg",
+    "profile_note": "<p>Rania  Gaza,🇵🇸<br />My beautiful babyKinda, asks for your help💔 after displacement and suffering. She needs winter clothes. situation is very bad Donations Very little  Help Kinda by providing winter clothes.  will get clothes Please donate🙏🇵🇸👇 </p><p><a href=\"https://chuffed.org/project/191196-help-a-mother-and-her-family-survive\" target=\"_blank\" rel=\"nofollow noopener\" translate=\"no\"><span class=\"invisible\">https://</span><span class=\"ellipsis\">chuffed.org/project/191196-hel</span><span class=\"invisible\">p-a-mother-and-her-family-survive</span></a></p><p><a href=\"https://www.paypal.com/ncp/payment/DAVNW4CXD7E3L\" target=\"_blank\" rel=\"nofollow noopener\" translate=\"no\"><span class=\"invisible\">https://www.</span><span class=\"ellipsis\">paypal.com/ncp/payment/DAVNW4C</span><span class=\"invisible\">XD7E3L</span></a><br /><a href=\"https://gaza-verified.org/people/@Rania@freesewing.social/\" target=\"_blank\" rel=\"nofollow noopener\" translate=\"no\"><span class=\"invisible\">https://</span><span class=\"ellipsis\">gaza-verified.org/people/@Rani</span><span class=\"invisible\">a@freesewing.social/</span></a><br /><a href=\"https://www.journeyman.cc/blog/posts-output/2026-06-05-Ranias-story/\" target=\"_blank\" rel=\"nofollow noopener\" translate=\"no\"><span class=\"invisible\">https://www.</span><span class=\"ellipsis\">journeyman.cc/blog/posts-outpu</span><span class=\"invisible\">t/2026-06-05-Ranias-story/</span></a><br /><a href=\"https://bsky.app/profile/mommunism.bsky.social/post/3lxen3obduk2g\" target=\"_blank\" rel=\"nofollow noopener\" translate=\"no\"><span class=\"invisible\">https://</span><span class=\"ellipsis\">bsky.app/profile/mommunism.bsk</span><span class=\"invisible\">y.social/post/3lxen3obduk2g</span></a></p>",
+    "profile_fields": {
+     "Gaza verified": "https://gaza-verified.org/people/@Rania@freesewing.social/"
+    },
+    "disabled": false,
+    "campaign_url": "https://www.chuffed.org/project/191196-help-a-mother-and-her-family-survive",
+    "last_status_id": "117058855441518091",
+    "created_at": "2025-10-03T00:00:00",
+    "instance_down_since": null,
+    "source_removed_since": null,
+    "state": "ACTIVE",
+    "username": "Rania",
+    "feed_url": "https://freesewing.social/@Rania.rss",
+    "instance": "freesewing.social",
+    "instance_url": "https://freesewing.social",
+    "fqn": "@Rania@freesewing.social",
+    "api_url": "https://freesewing.social/api/v1/accounts/115311482808831682",
+    "avatar_path": "/media/@Rania@freesewing.social/avatars/73f558503dd5baa1.jpg",
+    "header_path": "/media/@Rania@freesewing.social/headers/d73da349cbfe25b9.jpg"
+   },
+   "amount": {
+    "amount": 12,
+    "currency": "USD",
+    "string": "$12.00"
+   },
+   "first_donation_time": "2026-08-05T12:00:00",
+   "last_donation_time": "2026-08-05T12:00:00",
+   "last_activity_time": "2026-08-05T12:00:00"
+  },
+  {
+   "group_key": [
+    "account.url"
+   ],
+   "group_value": [
+    "https://mastodon.social/@sharifgaza"
+   ],
+   "data": [],
+   "state": "ACTIVE",
+   "account": {
+    "url": "https://mastodon.social/@sharifgaza",
+    "id": "115799111518260662",
+    "display_name": "sharifgaza",
+    "avatar_url": "https://files.mastodon.social/accounts/avatars/115/799/111/518/260/662/original/732584d01f3663bb.jpg",
+    "header_url": "https://mastodon.social/headers/original/missing.png",
+    "profile_note": "<p><a href=\"https://whydonate.com/fundraising/donate-to-save-my-innocent-children-please-\" target=\"_blank\" rel=\"nofollow noopener\" translate=\"no\"><span class=\"invisible\">https://</span><span class=\"ellipsis\">whydonate.com/fundraising/dona</span><span class=\"invisible\">te-to-save-my-innocent-children-please-</span></a></p>",
+    "profile_fields": {
+     "Every bit of support from you, whether sharing or donating, lights the way for my children in these difficult times.": "",
+     "Gaza Verified": "https://gaza-verified.org/people/@sharifgaza@mastodon.social/"
+    },
+    "disabled": false,
+    "campaign_url": "https://whydonate.com/fundraising/donate-to-save-my-innocent-children-please-",
+    "last_status_id": "117015551596778398",
+    "created_at": "2025-12-28T00:00:00",
+    "instance_down_since": null,
+    "source_removed_since": null,
+    "state": "ACTIVE",
+    "username": "sharifgaza",
+    "feed_url": "https://mastodon.social/@sharifgaza.rss",
+    "instance": "mastodon.social",
+    "instance_url": "https://mastodon.social",
+    "fqn": "@sharifgaza@mastodon.social",
+    "api_url": "https://mastodon.social/api/v1/accounts/115799111518260662",
+    "avatar_path": "/media/@sharifgaza@mastodon.social/avatars/732584d01f3663bb.jpg",
+    "header_path": "/media/@sharifgaza@mastodon.social/headers/missing.png"
+   },
+   "amount": {
+    "amount": 300,
+    "currency": "USD",
+    "string": "$300.00"
+   },
+   "first_donation_time": "2026-08-08T01:00:00",
+   "last_donation_time": "2026-08-08T01:00:00",
+   "last_activity_time": "2026-08-08T01:00:00"
+  }
+ ],
+ "state": null,
+ "amount": {
+  "amount": 357.5,
+  "currency": "USD",
+  "string": "$357.50"
+ },
+ "first_donation_time": null,
+ "last_donation_time": null,
+ "last_activity_time": "2026-08-08T09:15:40.908000"
+}

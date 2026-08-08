@@ -1,0 +1,12 @@
+node_modules/
+
+# Never commit local state: it holds card ciphertext, the donation ledger and
+# cached API responses.
+config.json
+*.enc
+ledger.jsonl
+.cache/
+debug/
+
+.idea/
+

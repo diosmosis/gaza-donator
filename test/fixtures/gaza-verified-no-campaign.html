@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="icon" href="data:,"><title>Gaza Verified</title><link rel="stylesheet" href="/🐱/library/water-2.min.css"><meta name="og:title" content="Gaza Verified"><meta name="description" content="We’ve personally had video conversations on Signal with the people from Gaza whose Mastodon accounts on the fediverse are listed here and we verify that their accounts are genuine. – Joy &amp; Aral Balkan"><meta name="og:description" content="We’ve personally had video conversations on Signal with the people from Gaza whose Mastodon accounts on the fediverse are listed here and we verify that their accounts are genuine. – Joy &amp; Aral Balkan"><meta name="og:image" content="/images/open-graph.png"><link rel="me" href="https://mastodon.social/@memefases"><style>
+
+          :root {
+  --image-width: 140px;
+  --palestinian-flag-green: #149954;
+  --palestinian-flag-red: #E4312b;
+  accent-color: var(--palestinian-flag-green);
+  box-sizing: border-box;
+}
+
+.donation-widget {
+  margin-top: 2em;
+}
+
+.startDate {
+  margin-top: -0.75em;
+  margin-bottom: 1.25em;
+}
+
+.rtl {
+  direction: rtl;
+}
+
+.joinUs {
+  font-size: 1.5em;
+  text-align: center;
+  
+   a {
+    text-decoration: underline;
+    text-decoration-thickness: 3px;
+    text-underline-offset: 0.5em;
+   }
+}
+
+header {
+  text-align: center;
+
+  h1 {
+    font-size: 3em;
+    margin-top: 0em;
+  }
+}
+
+footer {
+  text-align: center;
+  margin-top: 2em;
+}
+
+pre, pre code {
+  white-space: pre-wrap;
+}
+
+.important {
+  padding: 1em;
+}
+
+.important, .important * {
+  background-color: var(--palestinian-flag-red);
+  color: white;
+}
+
+.wheelChairMotion {
+  margin-bottom: -0.5em;
+}
+
+.inlineButton {
+  display: inline-block;
+  margin-left: 0.5em;
+  padding: 0.25em;
+}
+
+a {
+  color: var(--palestinian-flag-green);
+}
+
+.webGuideImages {
+  display: flex;
+  flex-direction: column;
+  row-gap: 1em;
+}
+
+.iosGuideImages {
+  display: flex;
+  column-gap: 0.5em;
+}
+.iosGuideImages * {
+  flex-basis: 100%;
+  max-width:calc(50% - 0.5em);
+  border: 1px solid #eee;
+}
+
+        
+
+        nav {
+          ul {
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+            padding-inline-start: 0;
+            margin-block-start: 0.5em;
+          }
+          li {
+            list-style: none;
+            display: inline-block;
+            margin-right: 1em;
+            font-size: 1.25em;
+          }
+        }
+        a.mastodonButton, button.mastodonButton {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.5em;
+          background: #6364ff;
+          color: white;
+          padding: 0.5em 0;
+          border-radius: 5px;
+          min-width: 150px;
+          margin: 0;
+        }
+        a.mastodonButton:hover {
+          text-decoration:none;
+        }
+      
+
+        :root {
+          --accessible-deep-pink: #e5007c;
+        }
+        #toast.settling { opacity: 1; top: 1em; }
+        #toast {
+          z-index: 999;
+          opacity: 0;
+          top: -3em;
+          position: fixed;
+          transition: all 0.7s ease-out;
+          left: 50%;
+          transform: translate(-50%, 0); /* centre horizontally */
+          border-radius: 1em;
+          color: white;
+          background-color: var(--accessible-deep-pink);
+          padding: 1em;
+          font-weight: bold;
+        }
+      
+
+    .verificationStatusCard {
+      border: 5px solid black;
+      margin-top: 1em;
+
+      .team {
+        display: flex;
+        align-items: center;
+        gap: 0.25em;
+      }
+
+      .account {
+        display: flex;
+        flex-direction: row-reverse;
+        justify-content: flex-end;
+        align-items: center;
+        column-gap: 1em;
+
+        div {
+          overflow: hidden;
+        }
+
+        img {
+          width: 17%;
+          height: 100%;
+        }
+      }
+
+      .displayName {
+        font-size: min(7vw, 36px);
+        margin: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      .handle {
+        font-size: min(4vw, 24px);
+        margin: 0;
+      }
+
+      .handleVerified a {
+        color: var(--palestinian-flag-green);
+      }
+
+      .handleUnverified a {
+        color: var(--palestinian-flag-red);
+      }
+
+      .handleScheduled a {
+        color: #666;
+      }
+
+      .verified, .unverified, .scheduled {
+        font-size: 1.5em;
+        color: white;
+        display: flex;
+        column-gap: 0.25em;
+        justify-content: center;
+        align-items: center;
+        padding: 0.25em 0.5em;
+        h2 {
+          all: inherit;
+          padding: 0;
+        }
+      }
+
+      .verified {
+        background-color: var(--palestinian-flag-green);
+      }
+
+      .unverified {
+        background-color: var(--palestinian-flag-red);
+      }
+
+      .scheduled {
+        background-color: #666;
+      }
+    }
+  
+
+    .bio {
+      font-size: 1.25em;
+      border: 5px solid #ccc;
+      padding: 0 1em;
+      margin-top: 1em;
+    }
+    .spacer { display: block; margin-top: 1em; }
+    .verificationStatusCard { margin-top: 24px; } /* Match H2 margin top from Water.css */
+  
+
+    .emergencyAppeal {
+      display: flex;
+      margin: -1em 0;
+      align-items: center;
+      justify-content: center;
+      .icon { margin-right: 0.5em; }
+    }
+  
+</style></head>
+<body  class=""><div><header><a href="/"><img src="/palestine-flag-heart.svg" alt="Heart-shaped Palestinian flag."></a><h1><a href="/">Gaza Verified</a></h1><nav><ul><li SLOT=""><a href="/">Home</a></li><li SLOT=""><a href="/people/">People</a></li><li SLOT=""><a href="/donate/">Donate</a></li><li SLOT=""><a href="/guide/">Guide</a></li><li SLOT=""><a href="/team/">Team</a></li><li SLOT="" CLASS="rtl"><a href="/guide-arabic/">دليل</a></li><li SLOT="" CLASS="rtl"><a href="/join/">انضم إلنا!</a></li><a class="mastodonButton" href="/private/"><svg viewBox="0 0 256 256" fill="white" width="1.5em" height="1.5em" alt="mastodon logo"><path d="M216,72v72a32,32,0,0,1-32,32H40V72A32,32,0,0,1,72,40H184A32,32,0,0,1,216,72Z" opacity="0.2"/><path d="M184,32H72A40,40,0,0,0,32,72V192a40,40,0,0,0,40,40h88a8,8,0,0,0,0-16H72a24,24,0,0,1-24-24v-8H184a40,40,0,0,0,40-40V72A40,40,0,0,0,184,32Zm24,112a24,24,0,0,1-24,24H48V72A24,24,0,0,1,72,48H184a24,24,0,0,1,24,24Zm-24-40v32a8,8,0,0,1-16,0V104a16,16,0,0,0-32,0v32a8,8,0,0,1-16,0V104a16,16,0,0,0-32,0v32a8,8,0,0,1-16,0V104a32,32,0,0,1,56-21.13A32,32,0,0,1,184,104Z"/></svg> <div class="rtl">تسجيل الدخول</div></a></ul></nav></header><div id="toast" aria-live="assertive" hx-swap-oob="morph settle:5s" hx-ext="morph"></div><main><div class="verificationStatusCard"><div class="account"><div><p class="displayName">Meme Fares</p><p class="handle handleVerified"><a href="https://mastodon.social/@memefases">@memefases@mastodon.social</a></p></div><img class="profileImage" src="https://files.mastodon.social/accounts/avatars/117/049/215/641/525/923/original/d4a449794757de4c.jpg" alt="memefases’s profile image"></div><div class="verified"><svg viewBox="0 0 256 256" fill="white" width="1.5em" height="1.5em" alt="seal check"><path d="M232,128c0,12.51-17.82,21.95-22.68,33.69-4.68,11.32,1.42,30.65-7.78,39.85s-28.53,3.1-39.85,7.78C150,214.18,140.5,232,128,232s-22-17.82-33.69-22.68c-11.32-4.68-30.65,1.42-39.85-7.78s-3.1-28.53-7.78-39.85C41.82,150,24,140.5,24,128s17.82-22,22.68-33.69C51.36,83,45.26,63.66,54.46,54.46S83,51.36,94.31,46.68C106.05,41.82,115.5,24,128,24S150,41.82,161.69,46.68c11.32,4.68,30.65-1.42,39.85,7.78s3.1,28.53,7.78,39.85C214.18,106.05,232,115.5,232,128Z" opacity="0.2"/><path d="M225.86,102.82c-3.77-3.94-7.67-8-9.14-11.57-1.36-3.27-1.44-8.69-1.52-13.94-.15-9.76-.31-20.82-8-28.51s-18.75-7.85-28.51-8c-5.25-.08-10.67-.16-13.94-1.52-3.56-1.47-7.63-5.37-11.57-9.14C146.28,23.51,138.44,16,128,16s-18.27,7.51-25.18,14.14c-3.94,3.77-8,7.67-11.57,9.14C88,40.64,82.56,40.72,77.31,40.8c-9.76.15-20.82.31-28.51,8S41,67.55,40.8,77.31c-.08,5.25-.16,10.67-1.52,13.94-1.47,3.56-5.37,7.63-9.14,11.57C23.51,109.72,16,117.56,16,128s7.51,18.27,14.14,25.18c3.77,3.94,7.67,8,9.14,11.57,1.36,3.27,1.44,8.69,1.52,13.94.15,9.76.31,20.82,8,28.51s18.75,7.85,28.51,8c5.25.08,10.67.16,13.94,1.52,3.56,1.47,7.63,5.37,11.57,9.14C109.72,232.49,117.56,240,128,240s18.27-7.51,25.18-14.14c3.94-3.77,8-7.67,11.57-9.14,3.27-1.36,8.69-1.44,13.94-1.52,9.76-.15,20.82-.31,28.51-8s7.85-18.75,8-28.51c.08-5.25.16-10.67,1.52-13.94,1.47-3.56,5.37-7.63,9.14-11.57C232.49,146.28,240,138.44,240,128S232.49,109.73,225.86,102.82Zm-11.55,39.29c-4.79,5-9.75,10.17-12.38,16.52-2.52,6.1-2.63,13.07-2.73,19.82-.1,7-.21,14.33-3.32,17.43s-10.39,3.22-17.43,3.32c-6.75.1-13.72.21-19.82,2.73-6.35,2.63-11.52,7.59-16.52,12.38S132,224,128,224s-9.15-4.92-14.11-9.69-10.17-9.75-16.52-12.38c-6.1-2.52-13.07-2.63-19.82-2.73-7-.1-14.33-.21-17.43-3.32s-3.22-10.39-3.32-17.43c-.1-6.75-.21-13.72-2.73-19.82-2.63-6.35-7.59-11.52-12.38-16.52S32,132,32,128s4.92-9.15,9.69-14.11,9.75-10.17,12.38-16.52c2.52-6.1,2.63-13.07,2.73-19.82.1-7,.21-14.33,3.32-17.43S70.51,56.9,77.55,56.8c6.75-.1,13.72-.21,19.82-2.73,6.35-2.63,11.52-7.59,16.52-12.38S124,32,128,32s9.15,4.92,14.11,9.69,10.17,9.75,16.52,12.38c6.1,2.52,13.07,2.63,19.82,2.73,7,.1,14.33.21,17.43,3.32s3.22,10.39,3.32,17.43c.1,6.75.21,13.72,2.73,19.82,2.63,6.35,7.59,11.52,12.38,16.52S224,124,224,128,219.08,137.15,214.31,142.11ZM173.66,98.34a8,8,0,0,1,0,11.32l-56,56a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35A8,8,0,0,1,173.66,98.34Z"/></svg> <h2>Verified </h2></div></div><div><h2 id="bio">Bio</h2><div class="bio"><p>🇵🇸💔I am Mervat Fares, a widow and the mother of three children🇵🇸💔😭</p></div></div><div class="disclaimer"><h2 id="what-verification-means" tabindex="-1">What verification means</h2><p>Verification means that two volunteers from <a href="/team">our team</a> – one from Gaza and one from outside Gaza – had a video call with the person/people listed here.</p><p>During the call we:</p><ul><li><p>Spoke to them to Palestinian Arabic</p></li><li><p>Had them show us around outside their home to verify that they are in Gaza (if their profile lists them as being there; we also verify Gazans who have been displaced to other countries and regions).</p></li><li><p>If their profile states they’re in Gaza, we have checked they have an IP address in Gaza.</p></li></ul><p><strong>Verification means that, based on the above process, we believe they are Palestinian from Gaza. It is not a character reference and does not attest to anything beyond this.</strong></p><h2 id="how-we-can-help" tabindex="-1">How we can help</h2><p>If this account is unfairly limited or suspended for who they are – and has not broken the <a href="/guide/#rules">rules</a> – please get in touch with us and we will advocate on their behalf and help them move to a <a href="/guide/#servers">safe server</a> if need be.</p><h2 id="please-be-kind" tabindex="-1">Please be kind 💕</h2><p>Please remember that this person and their family are facing genocide, ethnic cleansing, and apartheid at the hands of the settler colonialists in Israel.</p><p>Mastodon and the fediverse is one of the only lifelines they have to the outside world.</p><p>So, please, be understanding, kind, and welcoming.</p></div></main><footer><p><svg viewBox="0 0 256 256" fill="#0076FF" width="2em" height="2em" alt="wheelchair motion" CLASS="wheelChairMotion"><path d="M200,48a24,24,0,1,1-24-24A24,24,0,0,1,200,48Z" opacity="0.2"/><path d="M176,80a32,32,0,1,0-32-32A32,32,0,0,0,176,80Zm0-48a16,16,0,1,1-16,16A16,16,0,0,1,176,32Zm-8,136a64,64,0,1,1-64-64,8,8,0,0,1,0,16,48,48,0,1,0,48,48,8,8,0,0,1,16,0Zm38.19-37.07a8,8,0,0,1,1.65,6.64l-16,80A8,8,0,0,1,184,224a7.77,7.77,0,0,1-1.58-.16,8,8,0,0,1-6.27-9.41L190.24,144H128a8,8,0,0,1-6.94-12l20.06-34.9a80.09,80.09,0,0,0-88,9.17A8,8,0,1,1,42.91,94a96,96,0,0,1,113.46-6.42,8,8,0,0,1,2.57,10.69L141.82,128H200A8,8,0,0,1,206.19,130.93Z"/></svg>This site aims for <a href="https://www.w3.org/WAI/WCAG2AA-Conformance">WCAG 2.1 AA</a> accessibility conformance. Notice a problem? Please <a href="https://codeberg.org/small-web/gaza-verified.org/issues">open an issue</a>.</p><div class="emergencyAppeal"><svg viewBox="0 0 256 256" fill="currentColor" width="2em" height="2em" alt="hand heart" CLASS="icon"><path d="M16,152H48v56H16a8,8,0,0,1-8-8V160A8,8,0,0,1,16,152ZM192.54,40A39.12,39.12,0,0,0,156,64a39.12,39.12,0,0,0-36.54-24C97.67,40,80,58.31,80,80c0,14.56,7,27.71,16.73,40H140a20,20,0,0,1,0,40h4l37.78-8.68C203.82,135.07,232,109.23,232,80,232,58.31,214.33,40,192.54,40Z" opacity="0.2"/><path d="M230.33,141.06a24.34,24.34,0,0,0-18.61-4.77C230.5,117.33,240,98.48,240,80c0-26.47-21.29-48-47.46-48A47.58,47.58,0,0,0,156,48.75,47.58,47.58,0,0,0,119.46,32C93.29,32,72,53.53,72,80c0,11,3.24,21.69,10.06,33a31.87,31.87,0,0,0-14.75,8.4L44.69,144H16A16,16,0,0,0,0,160v40a16,16,0,0,0,16,16H120a7.93,7.93,0,0,0,1.94-.24l64-16a6.94,6.94,0,0,0,1.19-.4L226,182.82l.44-.2a24.6,24.6,0,0,0,3.93-41.56ZM119.46,48A31.15,31.15,0,0,1,148.6,67a8,8,0,0,0,14.8,0,31.15,31.15,0,0,1,29.14-19C209.59,48,224,62.65,224,80c0,19.51-15.79,41.58-45.66,63.9l-11.09,2.55A28,28,0,0,0,140,112H100.68C92.05,100.36,88,90.12,88,80,88,62.65,102.41,48,119.46,48ZM16,160H40v40H16Zm203.43,8.21-38,16.18L119,200H56V155.31l22.63-22.62A15.86,15.86,0,0,1,89.94,128H140a12,12,0,0,1,0,24H112a8,8,0,0,0,0,16h32a8.32,8.32,0,0,0,1.79-.2l67-15.41.31-.08a8.6,8.6,0,0,1,6.3,15.9Z"/></svg><p><a href="/emergency">The Gaza Verified Emergency Appeal</a> is now over. We raised $40,200 thanks to your support.</p></div><p xmlns:cc="http://creativecommons.org/ns#" xmlns:dct="http://purl.org/dc/terms/"><a property="dct:title" rel="cc:attributionURL" href="https://codeberg.org/small-web/gaza-verified.org">Gaza Verified</a> is &copy; 2025-present by <a rel="cc:attributionURL dct:creator" property="cc:attributionName" href="https://ar.al">Aral Balkan</a>. Licenses: <a href="http://creativecommons.org/licenses/by-nc-sa/4.0/?ref=chooser-v1" target="_blank" rel="license noopener noreferrer" style="display:inline-block;">CC BY-NC-SA 4.0</a> (content) and <a href="https://www.gnu.org/licenses/agpl-3.0.en.html">AGPL v3.0</a> (code).</p><p>Powered by <a href="https://kitten.small-web.org">Kitten</a> and brought to you with ♥ by <a href="https://small-tech.org">Small Technology Foundation</a>.</p><p><a href="/">Home</a> | <a href="/people/">People</a> | <a href="/guide">Guide</a> | <a href="/guide-arabic/" class="rtl">دليل</a> | <a href="/join/" class="rtl">انضم إلنا</a> | <a href="/privacy/">Privacy policy</a> | <a href="/admin/">Admin</a> | <a href="https://codeberg.org/small-web/gaza-verified.org">View source</a></p></footer><script id="js"></script></div><script id="kitten-internal-commands"></script></body>
+</html>

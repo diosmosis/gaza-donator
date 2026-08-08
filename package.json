@@ -1,0 +1,21 @@
+{
+  "name": "palestine-donator",
+  "version": "0.1.0",
+  "description": "Automates recurring donations to Gaza Verified Palestinians running Chuffed/GoFundMe campaigns.",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "palestine-donator": "bin/donate.js"
+  },
+  "scripts": {
+    "test": "node --test test/",
+    "plan": "node bin/donate.js plan"
+  },
+  "dependencies": {
+    "puppeteer": "^24.10.0"
+  }
+}
