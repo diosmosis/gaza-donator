@@ -33,4 +33,5 @@ when choosing people to donate to, those who have received the least amount of m
 - dry-run by default, with an explicit command to donate
 - api requests should be cached with a ttl of 15 mins
 - data from the api may need to be verified by opening and scraping a webpage
+- include tests
 
