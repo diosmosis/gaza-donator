@@ -18,6 +18,12 @@ import {
 } from '../src/config.js';
 import { editorCommand, openEditor } from '../src/editor.js';
 import { ensureDir, resolvePaths } from '../src/paths.js';
+import { GazaApi, indexStatsByAccount } from '../src/api.js';
+import { BrowserSession } from '../src/browser.js';
+import { buildCandidates } from '../src/select.js';
+import { checkCampaigns, summarise } from '../src/check.js';
+import { createConverter } from '../src/fx.js';
+import { Progress } from '../src/progress.js';
 import { Cache } from '../src/cache.js';
 import { CardStore, cardExpired, redactCard, validateCard } from '../src/card.js';
 import { Ledger, STATUS, budgetFor, round2 } from '../src/ledger.js';
@@ -28,6 +34,7 @@ import {
   formatMoney,
   green,
   red,
+  renderCheckReport,
   renderHistory,
   renderRecipients,
   renderRejections,
@@ -46,6 +53,9 @@ const OPTIONS = {
   limit: { type: 'string' },
   yes: { type: 'boolean', default: false },
   execute: { type: 'boolean', default: false },
+  concurrency: { type: 'string' },
+  deep: { type: 'boolean', default: false },
+  json: { type: 'string' },
   'no-cache': { type: 'boolean', default: false },
   'no-verify': { type: 'boolean', default: false },
   'clear-cache': { type: 'boolean', default: false },
@@ -61,6 +71,7 @@ the people who have received the least lately.
   ${bold('donate')} [--execute]   donate; without --execute it stops at the confirmation
   ${bold('card')} set|status|clear   manage the encrypted card
   ${bold('config')} edit|show|path   edit the config file in $EDITOR, or inspect it
+  ${bold('check')} [--deep]       visit every campaign and report what no longer parses
   ${bold('history')}              show past donations
 
 Options
@@ -70,7 +81,10 @@ Options
   --tip <amount>     tip to the fundraising platform per donation (default 0)
   --period <spec>    daily | weekly | monthly | "10d"
   --currency <code>  three letter currency code
-  --limit <n>        donate to at most n recipients this run
+  --limit <n>        donate to at most n recipients this run (check: campaigns to check)
+  --deep             check: also open each payment page and look for its controls
+  --concurrency <n>  check: campaigns to check at once (default 4)
+  --json <path>      check: write the full results there for further analysis
   --yes              skip the confirmation prompt
   --execute          actually donate (donate command only)
   --no-verify        skip the campaign / Gaza Verified checks (faster, less safe)
@@ -128,6 +142,8 @@ async function main() {
     case 'card':
       return commandCard({ paths, action: rest[0] ?? 'status' });
     // `config` is handled above, before the configuration is validated.
+    case 'check':
+      return commandCheck({ config, paths, flags });
     case 'history':
       return commandHistory({ config, paths });
     default:
@@ -329,6 +345,89 @@ async function commandCard({ paths, action }) {
       fail(`unknown card action "${action}" (use set, status or clear)`);
       return 2;
   }
+}
+
+/**
+ * The periodic health check: every Gaza Verified member's campaign page, opened
+ * and parsed, with what failed listed at the end.
+ *
+ * Read-only by construction — it never opens a payment form in a state that
+ * could submit anything.
+ */
+async function commandCheck({ config, paths, flags }) {
+  const cache = new Cache({ dir: paths.cacheDir, read: !flags['no-cache'] });
+  const api = new GazaApi({ cache });
+
+  const [accountsResult, statsResult] = await Promise.all([
+    api.getAccounts({ hideInactive: true }),
+    api.getAccountLifetimeStats({ currency: config.currency }),
+  ]);
+
+  // Every Gaza Verified member with a campaign link — not just the ones this
+  // run would donate to, and regardless of how much they have received.
+  const candidates = buildCandidates(
+    accountsResult.data,
+    new Map(),
+    indexStatsByAccount(statsResult.data),
+  ).filter((candidate) => candidate.gazaVerifiedUrl && candidate.campaignUrl);
+
+  const limit = numberFlag(flags.limit, '--limit', { integer: true });
+  const selected = limit === undefined ? candidates : candidates.slice(0, limit);
+  const concurrency = numberFlag(flags.concurrency, '--concurrency', { integer: true }) ?? 4;
+
+  const platforms = new Map();
+  for (const candidate of selected) {
+    const name = candidate.platform ?? 'unsupported';
+    platforms.set(name, (platforms.get(name) ?? 0) + 1);
+  }
+
+  console.log(
+    `${bold('Checking')} ${selected.length} Gaza Verified campaign(s) ` +
+      `(${[...platforms].map(([name, count]) => `${count} ${name}`).join(', ')}), ` +
+      `${concurrency} at a time${flags.deep ? ', payment forms included' : ''}`,
+  );
+  console.log(dim('Read-only: pages are opened and parsed, nothing is submitted.'));
+
+  const browser = new BrowserSession({ headless: true, timeoutMs: 45_000 });
+  const convert = createConverter({ base: config.currency, cache });
+  let progress = new Progress({ total: selected.length });
+  const startedAt = Date.now();
+
+  let results;
+  try {
+    results = await checkCampaigns({
+      candidates: selected,
+      browser,
+      concurrency,
+      convert,
+      deep: flags.deep,
+      onResult: (result) => progress.tick({ ok: result.ok, label: result.fqn }),
+      onRecheck: (count) => {
+        progress.finish();
+        console.log(dim(`  re-checking ${count} campaign(s) now the crawl is over`));
+        progress = new Progress({ total: count });
+      },
+    });
+  } finally {
+    progress.finish();
+    await browser.close();
+  }
+
+  console.log(
+    renderCheckReport(results, {
+      groups: summarise(results),
+      elapsedMs: Date.now() - startedAt,
+      deep: flags.deep,
+    }),
+  );
+
+  if (flags.json) {
+    fs.writeFileSync(flags.json, `${JSON.stringify(results, null, 2)}\n`);
+    console.log('');
+    console.log(dim(`full results written to ${flags.json}`));
+  }
+
+  return results.some((result) => !result.ok) ? 1 : 0;
 }
 
 async function commandConfig({ file, action }) {

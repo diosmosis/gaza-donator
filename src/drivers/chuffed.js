@@ -109,6 +109,25 @@ const driver = {
   label: 'Chuffed',
 
   /**
+   * What `check --deep` looks for on the payment page.
+   *
+   * `gated`: this page sits behind a Cloudflare Turnstile challenge that does
+   * not clear in a headless browser, so finding nothing proves nothing. The
+   * check reports that as inconclusive rather than as a broken selector.
+   */
+  form: {
+    gated: true,
+    url: (campaignUrl, inspection) => inspection?.payUrl ?? null,
+    fields: {
+      amount: SELECTORS.amountInput,
+      name: SELECTORS.nameInput,
+      email: SELECTORS.emailInput,
+      tip: SELECTORS.tipInput,
+      submit: SELECTORS.submitButton,
+    },
+  },
+
+  /**
    * Verification pass: is the campaign live, and what does its own page say it
    * has raised?
    *
@@ -248,8 +267,14 @@ async function setTip(page, tip) {
 
 async function readDonateHref(page) {
   // Only the href is read, and the button may be scrolled out of view.
+  //
+  // The wait is long because the consequence of giving up early is dropping a
+  // real person: the button is rendered by the page's own JavaScript, usually
+  // within 4 seconds but much later when the site is under load, and "no
+  // donate button" reads as a closed campaign. Waiting costs nothing when the
+  // button is there — the poll returns as soon as it appears.
   const handle = await findFirst(page, SELECTORS.donateButton, {
-    timeoutMs: 10_000,
+    timeoutMs: 25_000,
     visible: false,
   });
   if (!handle) return null;

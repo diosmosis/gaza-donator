@@ -101,6 +101,28 @@ const driver = {
   id: 'gofundme',
   label: 'GoFundMe',
 
+  /**
+   * What `check --deep` looks for on the payment page: the controls `prepare`
+   * needs before it can fill anything. The card fields are deliberately absent
+   * — they only render once the card payment method is chosen.
+   *
+   * GoFundMe's checkout renders headless, so a missing control here is a real
+   * finding rather than bot protection.
+   */
+  form: {
+    gated: false,
+    url: (campaignUrl) => donateUrl(campaignUrl),
+    fields: {
+      amount: SELECTORS.amountInput,
+      'tip slider': SELECTORS.tipSlider,
+      'card payment option': SELECTORS.cardRadio,
+      email: SELECTORS.email,
+      'first name': SELECTORS.firstName,
+      'last name': SELECTORS.lastName,
+      submit: SELECTORS.submitButton,
+    },
+  },
+
   async inspect(page, campaignUrl) {
     const response = await page.goto(campaignUrl, { waitUntil: 'domcontentloaded' });
     const status = response?.status() ?? 0;

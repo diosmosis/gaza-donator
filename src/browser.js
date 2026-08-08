@@ -35,21 +35,41 @@ export class BrowserSession {
    * @param {boolean} [options.headless]
    * @param {string} [options.userDataDir] persist the profile (headful mode)
    * @param {number} [options.timeoutMs]   default navigation timeout
+   * @param {(options: object) => Promise<object>} [options.launcher] stands in
+   *   for puppeteer.launch; only tests pass this
    */
-  constructor({ headless = true, userDataDir = null, timeoutMs = 45_000 } = {}) {
+  constructor({ headless = true, userDataDir = null, timeoutMs = 45_000, launcher = null } = {}) {
     this.headless = headless;
     this.userDataDir = userDataDir;
     this.timeoutMs = timeoutMs;
+    this.launcher = launcher;
     this.browser = null;
+    this.launching = null;
   }
 
+  /**
+   * The browser, starting it if it is not running.
+   *
+   * The launch is memoised as a *promise*, not just as the result: several
+   * pages opened at once would otherwise each find `browser` still null and
+   * start their own Chrome, and the extras — never stored, never closed —
+   * outlive the run.
+   */
   async launch() {
     if (this.browser) return this.browser;
 
-    const puppeteer = await loadPuppeteer();
+    this.launching ??= this.#start().catch((err) => {
+      this.launching = null; // let a later call try again
+      throw err;
+    });
+    return this.launching;
+  }
+
+  async #start() {
+    const launch = this.launcher ?? (await loadPuppeteer()).launch;
     if (this.userDataDir) ensureDir(this.userDataDir);
 
-    this.browser = await puppeteer.launch({
+    this.browser = await launch({
       headless: this.headless,
       userDataDir: this.userDataDir ?? undefined,
       defaultViewport: this.headless ? { width: 1280, height: 900 } : null,
@@ -83,10 +103,22 @@ export class BrowserSession {
   }
 
   async close() {
-    if (!this.browser) return;
-    const browser = this.browser;
+    // A launch still in flight has to be awaited, or its browser is orphaned.
+    const pending = this.launching;
+    this.launching = null;
+    const browser = this.browser ?? (pending ? await pending.catch(() => null) : null);
     this.browser = null;
+    if (!browser) return;
+
+    const child = browser.process?.() ?? null;
     await browser.close().catch(() => {});
+
+    // After a run with several pages open at once, Chrome sometimes outlives
+    // close() — and a surviving child process keeps the CLI running after it
+    // has printed everything it has to say.
+    if (child && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+    }
   }
 }
 

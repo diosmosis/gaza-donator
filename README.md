@@ -136,6 +136,7 @@ node bin/donate.js donate --execute          # actually donate
 node bin/donate.js donate --execute --limit 1   # one recipient, for a first run
 node bin/donate.js history                   # what has been donated this period
 node bin/donate.js config edit               # change the settings
+node bin/donate.js check                     # is the scraping still working?
 ```
 
 Useful flags: `--total`, `--amount`, `--tip`, `--period weekly|monthly|10d`, `--limit`, `--yes`,
@@ -181,8 +182,9 @@ Set `PALESTINE_DONATOR_HOME` to put all of it somewhere else. None of it lives i
 npm test
 ```
 
-162 tests, no network and no browser: selection and both ranking stages, currency parsing and
-conversion, budget arithmetic over the ledger
+193 tests, no network and no browser: selection and both ranking stages, currency parsing and
+conversion, the diagnostic's classification of findings, the browser session's lifecycle, budget
+arithmetic over the ledger
 (including tips), the misconfigured-budget hard stop, config loading and editor resolution, card
 encryption, cache behaviour, API query construction against captured fixtures, the Gaza Verified
 check against real captured pages, the drivers' pure helpers, and the payment loop's retry and abort
@@ -196,9 +198,44 @@ node bin/donate.js plan --total 40 --amount 10 --period weekly --limit 3
 
 ## When a site changes
 
-Campaign sites change their markup regularly. Every selector lives in one `SELECTORS` object per
-driver — `src/drivers/chuffed.js` and `src/drivers/gofundme.js` — as ordered fallback lists. If a
-run reports fields under "fill in yourself" that it used to fill, that object is the thing to fix.
+Campaign sites change their markup without warning, and the failure is quiet: a selector stops
+matching, a total reads as null, and the ranking silently gets worse. `check` turns that into a list.
+
+```sh
+node bin/donate.js check                    # every Gaza Verified campaign page
+node bin/donate.js check --deep             # also open each payment page
+node bin/donate.js check --json out.json    # full results, for further analysis
+```
+
+It walks **every** Gaza Verified member with a campaign link — not just the ones a run would donate
+to — opens each campaign page and confirms the things this tool depends on can still be read: the
+raised total, the campaign's currency, and the donate link. `--deep` also opens each payment page and
+looks for the controls the donation step fills. It is read-only: pages are opened and parsed, nothing
+is ever submitted. Expect around ten minutes for the full roster; there is a live progress line with
+an estimate, and `--concurrency` (default 4) trades politeness for speed.
+
+Findings are split by who has to act on them:
+
+| kind | meaning |
+| --- | --- |
+| `parse` | the page loaded but this tool could not read it — **likely a selector to fix** |
+| `campaign` | the campaign is gone, closed or unreachable — nothing to fix here |
+
+Two things keep the report trustworthy, both learned from the first full run:
+
+- **A finding has to reproduce, after the crawl is over.** Campaign pages render themselves in the
+  browser and slow down badly under a 250-page crawl, so everything that failed is re-checked one at
+  a time once the run has finished, and only reported if it fails again. Without this, the first full
+  run called 83 perfectly live campaigns "no donate button"; retrying immediately — still under our
+  own load — only cleared half of them. Even so, treat the list as *campaigns to look at* rather than
+  as proof: a slow page can still slip through both passes.
+- **Chuffed's payment page is reported as inconclusive**, not broken. It sits behind a Cloudflare
+  challenge that never clears headless, so `--deep` cannot learn anything there — and a check that
+  cried wolf every run would be a check nobody reads.
+
+Every selector lives in one `SELECTORS` object per driver — `src/drivers/chuffed.js` and
+`src/drivers/gofundme.js` — as ordered fallback lists. If a run reports fields under "fill in
+yourself" that it used to fill, that object is the thing to fix.
 Chuffed's tip field is the likeliest one to need it: its payment page only renders past a Cloudflare
 challenge, so those selectors are written from the page's conventions rather than observed. A tip
 the driver cannot set with confidence is reported for you to set by hand rather than guessed at.

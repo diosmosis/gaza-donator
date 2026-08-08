@@ -47,8 +47,8 @@ the run stops with an explanation and the three ways out (raise the cap, lower t
 donation). Otherwise the cap would silently swallow part of the budget on every run, which is far
 more likely to be a typo in an amount than a deliberate choice.
 
-This check has no escape hatch: no flag skips it, and every command — `plan`, `donate`, `history`,
-`card` — loads its configuration through the same validation.
+This check has no escape hatch: no flag skips it, and every command — `plan`, `donate`, `check`,
+`history`, `card` — loads its configuration through the same validation.
 
 The one exception is the `config` command, which is dispatched *before* the configuration is loaded
 and so before it is validated. Otherwise a value that fails validation would lock the user out of
@@ -206,6 +206,54 @@ quietly burn through the budget. Only confirmed donations are recorded as spent.
 `plan` never opens a payment page. `donate` re-runs the plan, asks for confirmation, and then still
 refuses to pay without an explicit `--execute`.
 
+## Keeping the scraping honest
+
+Every part of this that touches a campaign site is a guess about someone else's markup, and it decays
+silently: a selector stops matching, a total reads as null, and the ranking quietly gets worse
+without anything failing. `check` is the periodic answer.
+
+It walks **every** Gaza Verified member with a campaign link — not the shortlist a run would pay —
+and for each one confirms that what the tool depends on can still be read:
+
+| checked | why it matters |
+| --- | --- |
+| the campaign page opens and is not closed | a dead campaign should never reach the payment step |
+| the raised total parses | it is the final ranking key |
+| the campaign's currency is established | without it the total cannot be compared to anything |
+| the total converts to `currency` | same |
+| the donate link is on the page | the payment step starts from it |
+| (`--deep`) the payment page's controls exist | these are the selectors that cost money when they rot |
+
+Findings are classified by who must act: `parse` means the page loaded but this tool could not read
+it — a selector to fix — while `campaign` means the campaign itself is gone or closed, which is not
+a defect in the tool. They are grouped by generalised message (numbers and URLs collapsed) so that
+forty dead campaigns are one line, then listed individually with their URLs.
+
+Chuffed's payment page never clears its Cloudflare challenge headless, so `--deep` records that as
+**inconclusive** rather than as missing selectors. A check that reports the same false alarm every
+run is a check nobody reads.
+
+For the same reason, **a finding has to reproduce, and the second look happens after the crawl**:
+everything that failed is re-checked one campaign at a time once the run is over, and only reported
+if it fails again. Even that is not proof — a slow page can survive both passes — which is why the
+report heads its list "campaigns to look at" rather than "broken". The count that cleared on the second pass is printed separately — that number is about
+the sites' mood, not about this tool.
+
+The first full run made the case. It reported 83 live campaigns as having no donate button, because
+Chuffed renders that button in the browser — usually within 4 seconds, far later under sustained
+load. Retrying immediately, while our own crawl was still hammering the site, cleared only half of
+them; every remaining one passed when asked again in isolation. Hence two passes rather than an
+immediate retry.
+
+It also exposed a real defect in the donation path: `inspect` waited 10 seconds for that button and
+read its absence as a closed campaign, so a slow page would have quietly dropped those people from
+selection. The wait is now 25 seconds, which costs nothing when the button is there.
+
+The run is read-only: pages are opened and parsed, nothing is submitted. It takes about ten minutes
+for the full roster, so it prints a live progress line — one rewritten line on a terminal, periodic
+lines when redirected — and `--concurrency` (default 4) trades politeness for speed. `--json` writes
+the full results, including what *was* found, for looking at afterwards.
+
 ## Storage
 
 | what | where | notes |
@@ -233,7 +281,7 @@ charged in this window, and who has already been paid.
 Node.js 20+, ESM, no runtime dependency except Puppeteer. Tests use the built-in `node:test`.
 
 ```
-bin/donate.js             CLI: plan | donate | card | config | history
+bin/donate.js             CLI: plan | donate | card | config | check | history
 src/config.js             defaults <- file <- flags, validation, recurrence window
 src/editor.js             locating and running $VISUAL/$EDITOR for `config edit`
 src/paths.js              where config, cache, data and the browser profile live
@@ -252,6 +300,8 @@ src/report.js             tables and summaries
 src/url.js                URL normalisation and platform detection
 src/prompt.js             confirmation, hidden passphrase entry
 src/run.js                plan pipeline and the assisted payment loop
+src/check.js              the periodic scraping diagnostic
+src/progress.js           the progress line for long runs
 test/                     node:test, with captured API and HTML fixtures
 ```
 
@@ -268,8 +318,9 @@ because it does not render past Turnstile in a headless browser.
 
 ## Tests
 
-162 tests, no network and no browser: selection and both ranking stages, currency parsing and
-conversion, budget arithmetic over the ledger
+193 tests, no network and no browser: selection and both ranking stages, currency parsing and
+conversion, the diagnostic's classification of findings, the browser session's lifecycle, budget
+arithmetic over the ledger
 including tips, the misconfigured-budget hard stop, config loading and editor resolution, card
 encryption, cache behaviour, API query construction against captured fixtures, the Gaza Verified
 check against real captured pages, the drivers' pure helpers, and the payment loop's retry and abort

@@ -5,6 +5,7 @@
  */
 import { platformLabel } from './url.js';
 import { parseApiTime } from './time.js';
+import { formatDuration } from './progress.js';
 
 const COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
 
@@ -227,6 +228,81 @@ export function renderSummary(results, { currency, totalAmount, spentBefore }) {
     ...(tipped > 0 ? [`  tipped to the platforms: ${formatMoney(tipped, currency)}`] : []),
     `  remaining in this period: ${formatMoney(remaining, currency)} of ${formatMoney(totalAmount, currency)}`,
   ].join('\n');
+}
+
+/**
+ * `check` output: what broke, grouped, then one block per campaign so the URLs
+ * can be opened and looked at.
+ */
+export function renderCheckReport(results, { groups, elapsedMs, deep = false }) {
+  const failed = results.filter((result) => !result.ok);
+  const inconclusive = results.filter((result) => result.ok && result.inconclusive?.length > 0);
+  const flaky = results.filter((result) => result.clearedOnRetry?.length > 0);
+  const out = [];
+
+  out.push('');
+  out.push(bold('Summary'));
+  out.push(
+    `  checked ${results.length} campaign(s) in ${formatDuration(elapsedMs)}: ` +
+      `${green(`${results.length - failed.length} ok`)}, ` +
+      `${failed.length > 0 ? red(`${failed.length} with problems`) : '0 with problems'}` +
+      (deep ? '' : dim(' (payment forms not checked — pass --deep)')),
+  );
+
+  if (groups.length > 0) {
+    out.push('');
+    out.push(
+      renderTable(
+        groups.map((group) => ({
+          count: String(group.count),
+          kind: group.kind === 'parse' ? yellow(group.kind) : dim(group.kind),
+          message: truncate(group.message, 80),
+        })),
+        [
+          { key: 'count', header: 'count', align: 'right' },
+          { key: 'kind', header: 'kind' },
+          { key: 'message', header: 'problem' },
+        ],
+      ),
+    );
+    out.push('');
+    out.push(
+      dim(
+        '  parse = the page loaded but this tool could not read it (likely a selector to fix)\n' +
+          '  campaign = the campaign itself is gone, closed or unreachable',
+      ),
+    );
+  }
+
+  if (flaky.length > 0) {
+    out.push('');
+    out.push(
+      dim(
+        `  ${flaky.length} campaign(s) only parsed on the second attempt — the site was slow, ` +
+          'not broken',
+      ),
+    );
+  }
+
+  if (inconclusive.length > 0) {
+    out.push('');
+    out.push(dim(`  ${inconclusive.length} payment form(s) could not be checked: bot protection`));
+  }
+
+  if (failed.length > 0) {
+    out.push('');
+    out.push(bold('Campaigns to look at'));
+    for (const result of failed) {
+      out.push('');
+      out.push(`  ${result.fqn} ${dim(`(${platformLabel(result.platform) || 'unknown platform'})`)}`);
+      out.push(`    ${dim(result.campaignUrl ?? 'no campaign url')}`);
+      for (const problem of result.problems) {
+        out.push(`    - ${problem.kind === 'parse' ? yellow(problem.message) : problem.message}`);
+      }
+    }
+  }
+
+  return out.join('\n');
 }
 
 /** `history` output. */
