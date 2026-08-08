@@ -3,7 +3,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DEFAULT_CONFIG, loadConfig, recurrenceDays, validateConfig, windowStart } from '../src/config.js';
+import {
+  DEFAULT_CONFIG,
+  chargePerRecipient,
+  impliedRecipients,
+  loadConfig,
+  recurrenceDays,
+  validateConfig,
+  windowStart,
+} from '../src/config.js';
 import { resolvePaths } from '../src/paths.js';
 
 const tempHome = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pd-home-'));
@@ -49,6 +57,9 @@ test('validateConfig rejects configurations that would misspend money', () => {
     [{ totalAmount: 0 }, /totalAmount/],
     [{ donationAmount: -5 }, /donationAmount/],
     [{ donationAmount: 500 }, /cannot exceed totalAmount/],
+    [{ tipAmount: -1 }, /tipAmount/],
+    [{ tipAmount: 'lots' }, /tipAmount/],
+    [{ totalAmount: 10, donationAmount: 10, tipAmount: 1 }, /cannot exceed totalAmount/],
     [{ currency: 'dollars' }, /currency/],
     [{ recurrence: 'whenever' }, /recurrence/],
     [{ platforms: [] }, /platforms/],
@@ -65,6 +76,81 @@ test('validateConfig rejects configurations that would misspend money', () => {
       `expected ${JSON.stringify(override)} to be rejected`,
     );
   }
+});
+
+test('a tip is part of what each recipient costs', () => {
+  assert.equal(chargePerRecipient({ donationAmount: 10, tipAmount: 0 }), 10);
+  assert.equal(chargePerRecipient({ donationAmount: 10, tipAmount: 1.5 }), 11.5);
+  assert.equal(chargePerRecipient({ donationAmount: 10 }), 10, 'an absent tip is no tip');
+
+  assert.equal(impliedRecipients({ totalAmount: 200, donationAmount: 10, tipAmount: 0 }), 20);
+  assert.equal(impliedRecipients({ totalAmount: 200, donationAmount: 10, tipAmount: 2.5 }), 16);
+});
+
+test('a budget that would pay more people than maxRecipients is a hard stop', () => {
+  // $200 at $5 each is 40 people, but only 25 would ever be paid: the rest of
+  // the budget would vanish into the cap. That is a typo, not a plan.
+  assert.throws(
+    () => validateConfig({ ...DEFAULT_CONFIG, totalAmount: 200, donationAmount: 5 }),
+    /misconfigured budget[\s\S]*40 people[\s\S]*maxRecipients is 25/,
+  );
+
+  // Both stated ways out of it work.
+  assert.doesNotThrow(() =>
+    validateConfig({ ...DEFAULT_CONFIG, totalAmount: 200, donationAmount: 5, maxRecipients: 40 }),
+  );
+  assert.doesNotThrow(() =>
+    validateConfig({ ...DEFAULT_CONFIG, totalAmount: 125, donationAmount: 5 }),
+  );
+});
+
+test('the recipient-count check counts the tip as part of each donation', () => {
+  // 20 x $10 fits under a cap of 20; adding a tip means fewer people, not more.
+  assert.doesNotThrow(() =>
+    validateConfig({ ...DEFAULT_CONFIG, totalAmount: 200, donationAmount: 10, maxRecipients: 20 }),
+  );
+  assert.doesNotThrow(() =>
+    validateConfig({
+      ...DEFAULT_CONFIG,
+      totalAmount: 200,
+      donationAmount: 10,
+      tipAmount: 1,
+      maxRecipients: 18,
+    }),
+  );
+  assert.throws(
+    () =>
+      validateConfig({
+        ...DEFAULT_CONFIG,
+        totalAmount: 200,
+        donationAmount: 10,
+        tipAmount: 1,
+        maxRecipients: 17,
+      }),
+    /18 people/,
+  );
+});
+
+test('the recipient-count check cannot be bypassed by any command or flag', () => {
+  const home = tempHome();
+  const paths = resolvePaths({ PALESTINE_DONATOR_HOME: home });
+  fs.mkdirSync(paths.configDir, { recursive: true });
+  fs.writeFileSync(paths.configFile, JSON.stringify({ totalAmount: 200, donationAmount: 5 }));
+
+  // Every command loads its configuration through here, so there is nowhere the
+  // check does not run.
+  assert.throws(
+    () => loadConfig({ env: { PALESTINE_DONATOR_HOME: home } }),
+    /misconfigured budget/,
+  );
+  // A CLI override is checked on the same terms, not exempted from them.
+  assert.throws(
+    () => loadConfig({ env: { PALESTINE_DONATOR_HOME: home }, overrides: { donationAmount: 2 } }),
+    /misconfigured budget/,
+  );
+  assert.doesNotThrow(() =>
+    loadConfig({ env: { PALESTINE_DONATOR_HOME: home }, overrides: { maxRecipients: 40 } }),
+  );
 });
 
 test('loadConfig returns the defaults when no config file exists', () => {

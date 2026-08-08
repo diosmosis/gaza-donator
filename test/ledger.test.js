@@ -97,13 +97,39 @@ test('budgetFor turns the remaining budget into whole donations', () => {
   assert.deepEqual(budgetFor({ totalAmount: 200, donationAmount: 10, spent: 0, maxRecipients: 25 }), {
     spent: 0,
     remaining: 200,
+    perRecipient: 10,
     slots: 20,
   });
   assert.deepEqual(budgetFor({ totalAmount: 200, donationAmount: 10, spent: 155, maxRecipients: 25 }), {
     spent: 155,
     remaining: 45,
+    perRecipient: 10,
     slots: 4,
   });
+});
+
+test('a platform tip is part of what a recipient costs', () => {
+  const budget = budgetFor({
+    totalAmount: 100,
+    donationAmount: 10,
+    tipAmount: 2.5,
+    spent: 0,
+    maxRecipients: 25,
+  });
+  assert.equal(budget.perRecipient, 12.5);
+  assert.equal(budget.slots, 8, '8 x 12.50 fits in 100, 9 would not');
+});
+
+test('tips already charged count against the period budget', () => {
+  const { file } = tempLedger();
+  const ledger = new Ledger(file);
+  ledger.record(entry({ amount: 10, tip: 1.5 }));
+  ledger.record(entry({ amount: 10, tip: 0 }));
+
+  const since = new Date(Date.now() - 60_000);
+  assert.equal(ledger.spentSince(since), 21.5);
+  assert.equal(ledger.all()[0].tip, 1.5);
+  assert.ok(!('tip' in ledger.all()[1]), 'a zero tip is not written at all');
 });
 
 test('budgetFor never proposes more recipients than the cap', () => {

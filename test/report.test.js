@@ -108,6 +108,39 @@ test('the summary totals only successful donations and reports what is left', ()
   assert.match(summary, /timed out/);
 });
 
+test('the platform tip only earns a column when there is one', () => {
+  const chosen = [
+    {
+      displayName: 'Someone',
+      fqn: '@someone@x',
+      platform: 'chuffed',
+      receivedInPeriod: 0,
+      lastActivityTime: null,
+      verification: null,
+    },
+  ];
+  const options = { currency: 'USD', donationAmount: 10, periodLabel: 'last 7d' };
+
+  assert.ok(!renderRecipients(chosen, options).includes('platform tip'));
+  const tipped = renderRecipients(chosen, { ...options, tipAmount: 1.5 });
+  assert.match(tipped, /platform tip/);
+  assert.ok(tipped.includes('$1.50'));
+});
+
+test('the summary reports tips separately and counts them against the budget', () => {
+  const summary = renderSummary(
+    [
+      { fqn: '@a@x', amount: 10, tip: 1, status: 'success' },
+      { fqn: '@b@x', amount: 10, tip: 1, status: 'success' },
+    ],
+    { currency: 'USD', totalAmount: 100, spentBefore: 0 },
+  );
+
+  assert.match(summary, /donated this run: .*\$20\.00/);
+  assert.match(summary, /tipped to the platforms: \$2\.00/);
+  assert.match(summary, /remaining in this period: \$78\.00/);
+});
+
 test('the summary never reports a negative remaining budget', () => {
   const summary = renderSummary([{ fqn: '@a@x', amount: 10, status: 'success' }], {
     currency: 'USD',

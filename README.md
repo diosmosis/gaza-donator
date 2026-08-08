@@ -48,6 +48,7 @@ Optional config at `~/.config/palestine-donator/config.json`:
 {
   "totalAmount": 200,
   "donationAmount": 10,
+  "tipAmount": 0,
   "currency": "USD",
   "recurrence": "weekly",
   "platforms": ["chuffed", "gofundme"],
@@ -66,6 +67,28 @@ Optional config at `~/.config/palestine-donator/config.json`:
 `totalAmount` is a **per-period cap**: with a weekly recurrence it is the most that will be donated
 inside any rolling 7 days, so re-running mid-week tops up other people instead of doubling up.
 
+`tipAmount` is what the fundraising platform itself gets per donation, on top of `donationAmount`.
+Both sites ask for one and default it to a nonzero percentage; at the default of `0` the drivers
+push it back down to nothing so the whole amount reaches the family. A tip is charged to the same
+card, so it counts against `totalAmount` — at `$10 + $1` a `$200` budget funds 18 recipients, not
+20.
+
+### The budget must fit inside maxRecipients
+
+If `totalAmount` would pay more people than `maxRecipients` allows, the script refuses to run at
+all:
+
+```
+error: misconfigured budget: totalAmount $200.00 at $5.00 per recipient would pay up to 40 people,
+  but maxRecipients is 25.
+  Raise maxRecipients to at least 40, or lower totalAmount to at most $125.00, or raise donationAmount.
+```
+
+Otherwise the cap would silently swallow the rest of the budget every run, which is far more likely
+to be a typo in an amount than a deliberate choice. **There is no flag that skips this check** —
+every command loads its configuration through the same validation, so `plan`, `donate`, `history`
+and `card` all stop until the numbers agree.
+
 ## Use
 
 ```sh
@@ -76,7 +99,7 @@ node bin/donate.js donate --execute --limit 1   # one recipient, for a first run
 node bin/donate.js history                   # what has been donated this period
 ```
 
-Useful flags: `--total`, `--amount`, `--period weekly|monthly|10d`, `--limit`, `--yes`,
+Useful flags: `--total`, `--amount`, `--tip`, `--period weekly|monthly|10d`, `--limit`, `--yes`,
 `--no-verify`, `--no-cache`, `--clear-cache`, `--debug`.
 
 For a scheduled run, set `PALESTINE_DONATOR_PASSPHRASE` and pass `--yes`. The browser step still
@@ -92,8 +115,8 @@ Instead, `donate --execute` opens a **visible** browser with a persistent profil
 recipient:
 
 1. navigates to the campaign's payment page,
-2. fills in the amount, your donor details and the card, and — on GoFundMe — drags the platform tip
-   to zero so the whole amount reaches the family,
+2. fills in the amount, your donor details and the card, and sets the platform tip to `tipAmount`
+   (zero by default, so the whole amount reaches the family),
 3. prints what it filled and what it could not, then waits while **you** clear any challenge and
    press the site's own donate button,
 4. watches for the confirmation page and records the result.
@@ -119,10 +142,10 @@ Set `PALESTINE_DONATOR_HOME` to put all of it somewhere else. None of it lives i
 npm test
 ```
 
-111 tests, no network and no browser: selection and ranking, budget arithmetic over the ledger, card
-encryption, cache behaviour, API query construction against captured fixtures, the Gaza Verified
-check against real captured pages, the drivers' pure helpers, and the payment loop's retry and abort
-rules driven through a fake browser.
+123 tests, no network and no browser: selection and ranking, budget arithmetic over the ledger
+(including tips), the misconfigured-budget hard stop, card encryption, cache behaviour, API query
+construction against captured fixtures, the Gaza Verified check against real captured pages, the
+drivers' pure helpers, and the payment loop's retry and abort rules driven through a fake browser.
 
 The browser paths are verified by running against the live sites:
 
@@ -135,6 +158,9 @@ node bin/donate.js plan --total 40 --amount 10 --period weekly --limit 3
 Campaign sites change their markup regularly. Every selector lives in one `SELECTORS` object per
 driver — `src/drivers/chuffed.js` and `src/drivers/gofundme.js` — as ordered fallback lists. If a
 run reports fields under "fill in yourself" that it used to fill, that object is the thing to fix.
+Chuffed's tip field is the likeliest one to need it: its payment page only renders past a Cloudflare
+challenge, so those selectors are written from the page's conventions rather than observed. A tip
+the driver cannot set with confidence is reported for you to set by hand rather than guessed at.
 `--debug` screenshots the page to `~/.local/share/palestine-donator/debug/` when a donation fails.
 
 ## Note

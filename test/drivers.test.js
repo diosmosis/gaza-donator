@@ -5,8 +5,15 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import chuffed, { parseMoney } from '../src/drivers/chuffed.js';
-import gofundme, { donateUrl, formatExpiry, parseAmount, parseRaised, splitName } from '../src/drivers/gofundme.js';
+import chuffed, { parseMoney, tipLabel as chuffedTipLabel } from '../src/drivers/chuffed.js';
+import gofundme, {
+  donateUrl,
+  formatExpiry,
+  parseAmount,
+  parseRaised,
+  splitName,
+  tipLabel,
+} from '../src/drivers/gofundme.js';
 import { formatExpiry as stripeExpiry } from '../src/drivers/stripe.js';
 import { driverFor, driverById } from '../src/drivers/index.js';
 
@@ -65,6 +72,16 @@ test('expiry is formatted the way each site expects it', () => {
   const card = { expMonth: 3, expYear: 2030 };
   assert.equal(formatExpiry(card), '03/30', 'GoFundMe uses a separator');
   assert.equal(stripeExpiry(card), '0330', 'Stripe fields insert their own');
+});
+
+test('the tip step names the amount it is aiming for', () => {
+  // The label is what tells the user, in the "filled" / "fill in yourself"
+  // lists, whether the platform is being tipped at all.
+  assert.equal(tipLabel(0), 'tip zeroed');
+  assert.equal(tipLabel(undefined), 'tip zeroed');
+  assert.equal(tipLabel(2.5), 'tip set to 2.5');
+  assert.equal(chuffedTipLabel(0), 'Chuffed tip zeroed');
+  assert.equal(chuffedTipLabel(1), 'Chuffed tip set to 1');
 });
 
 test('splitName fills both GoFundMe name fields', () => {

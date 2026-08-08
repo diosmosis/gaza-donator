@@ -176,6 +176,38 @@ export async function clickFirst(frame, selectors, { timeoutMs = 8000 } = {}) {
   });
 }
 
+/**
+ * Click the first element matching one of `selectors` whose text also matches
+ * `pattern`. Used where a class name alone is too blunt to be safe — the
+ * "enter custom tip" control on GoFundMe shares its class with other buttons on
+ * the checkout, and clicking the wrong one changes what is charged.
+ */
+export async function clickMatching(frame, selectors, pattern, { timeoutMs = 6000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    for (const selector of selectors) {
+      const handles = await frame.$$(selector).catch(() => []);
+      for (const handle of handles) {
+        const text = await handle.evaluate((el) => el.textContent ?? '').catch(() => '');
+        if (pattern.test(text)) {
+          try {
+            await handle.click();
+            return true;
+          } catch {
+            // fall through to the next candidate
+          } finally {
+            await handle.dispose();
+          }
+        } else {
+          await handle.dispose();
+        }
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  } while (Date.now() < deadline);
+  return false;
+}
+
 /** Current value of the first matching field, or null. */
 export async function readValue(frame, selectors, { timeoutMs = 4000 } = {}) {
   const handle = await findFirst(frame, selectors, { timeoutMs, visible: false });

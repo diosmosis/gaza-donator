@@ -6,14 +6,14 @@
  * scenes), so every field can be filled directly.
  *
  * Two details matter for donating the amount the user actually asked for:
- *   - GoFundMe pre-selects a tip to itself; `zeroTip` drags it to 0 so the whole
- *     amount reaches the family.
+ *   - GoFundMe pre-selects a tip to itself; `setTip` forces it to the configured
+ *     `tipAmount`, which defaults to 0 so the whole amount reaches the family.
  *   - The card fields only render once the "credit card" payment method is
  *     selected.
  *
  * Selectors observed on the live site (2026-08); see README if they rot.
  */
-import { clickFirst, findFirst, pageText, readValue, settle, typeInto } from '../browser.js';
+import { clickFirst, clickMatching, findFirst, pageText, readValue, settle, typeInto } from '../browser.js';
 import { waitForThanks } from './chuffed.js';
 
 export const SELECTORS = {
@@ -101,7 +101,7 @@ const driver = {
     return { ok: true, raisedTotal: parseRaised(text), payUrl: donateUrl(campaignUrl) };
   },
 
-  async prepare(page, { campaignUrl, amount, card, donor }) {
+  async prepare(page, { campaignUrl, amount, tip = 0, card, donor }) {
     await page.goto(donateUrl(campaignUrl), { waitUntil: 'domcontentloaded' });
     await page.waitForNetworkIdle({ idleTime: 1000, timeout: 30_000 }).catch(() => {});
 
@@ -116,7 +116,7 @@ const driver = {
     await settle();
 
     track('amount', await typeInto(page, SELECTORS.amountInput, String(amount), { timeoutMs: 15_000 }));
-    track('tip zeroed', await zeroTip(page));
+    track(tipLabel(tip), await setTip(page, tip));
 
     const { firstName, lastName } = splitName(donor?.name ?? card.name);
     if (donor?.email) track('email', await typeInto(page, SELECTORS.email, donor.email, { timeoutMs: 5000 }));
@@ -160,11 +160,31 @@ const driver = {
   },
 };
 
+/** What the tip step is called in the "filled" / "fill in yourself" lists. */
+export function tipLabel(tip) {
+  return Number(tip) > 0 ? `tip set to ${Number(tip)}` : 'tip zeroed';
+}
+
+/**
+ * Force the platform tip to `tip` (an absolute amount, 0 by default).
+ *
+ * GoFundMe never leaves the tip alone: it pre-selects a percentage of the
+ * donation. Zeroing is done with the slider, and any other amount through the
+ * custom-tip field, because the slider only stops on the percentages GoFundMe
+ * offers. Returning false puts the tip on the "fill in yourself" list rather
+ * than letting the site's default quietly stand.
+ */
+async function setTip(page, tip) {
+  const amount = Number(tip) || 0;
+  if (amount === 0 && (await zeroTipSlider(page))) return true;
+  return setCustomTip(page, amount);
+}
+
 /**
  * Drag the tip slider to its minimum. Keyboard Home is more reliable than
  * setting .value, which React ignores unless the native setter is used.
  */
-async function zeroTip(page) {
+async function zeroTipSlider(page) {
   const slider = await findFirst(page, SELECTORS.tipSlider, { timeoutMs: 6000 });
   if (!slider) return false;
   try {
@@ -178,6 +198,26 @@ async function zeroTip(page) {
   } finally {
     await slider.dispose();
   }
+}
+
+/** Type an exact tip into the custom-tip field, revealing it first if needed. */
+async function setCustomTip(page, amount) {
+  const existing = await findFirst(page, SELECTORS.customTipInput, { timeoutMs: 1500 });
+  if (existing) {
+    await existing.dispose();
+  } else {
+    const revealed = await clickMatching(page, SELECTORS.customTipButton, /custom tip|other amount|enter.*tip/i, {
+      timeoutMs: 6000,
+    });
+    if (!revealed) return false;
+    await settle(600);
+  }
+
+  if (!(await typeInto(page, SELECTORS.customTipInput, String(amount), { timeoutMs: 6000 }))) return false;
+
+  // Confirm rather than assume: this field reformats and clamps what it is
+  // given, and an unnoticed tip is money not reaching the family.
+  return parseAmount(await readValue(page, SELECTORS.customTipInput)) === amount;
 }
 
 /** Set a checkbox to a known state without toggling it the wrong way. */

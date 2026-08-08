@@ -9,7 +9,7 @@ import { parseArgs } from 'node:util';
 import { loadConfig, recurrenceDays, windowStart } from '../src/config.js';
 import { Cache } from '../src/cache.js';
 import { CardStore, cardExpired, redactCard, validateCard } from '../src/card.js';
-import { Ledger, STATUS, budgetFor } from '../src/ledger.js';
+import { Ledger, STATUS, budgetFor, round2 } from '../src/ledger.js';
 import { executeDonations, planRun } from '../src/run.js';
 import {
   bold,
@@ -29,6 +29,7 @@ const OPTIONS = {
   config: { type: 'string' },
   total: { type: 'string' },
   amount: { type: 'string' },
+  tip: { type: 'string' },
   period: { type: 'string' },
   currency: { type: 'string' },
   limit: { type: 'string' },
@@ -54,6 +55,7 @@ Options
   --config <path>    config file (default: ~/.config/palestine-donator/config.json)
   --total <amount>   budget for one recurrence period
   --amount <amount>  amount per recipient
+  --tip <amount>     tip to the fundraising platform per donation (default 0)
   --period <spec>    daily | weekly | monthly | "10d"
   --currency <code>  three letter currency code
   --limit <n>        donate to at most n recipients this run
@@ -85,6 +87,7 @@ async function main() {
     overrides: cleanUndefined({
       totalAmount: numberFlag(flags.total, '--total'),
       donationAmount: numberFlag(flags.amount, '--amount'),
+      tipAmount: numberFlag(flags.tip, '--tip'),
       recurrence: flags.period,
       currency: flags.currency?.toUpperCase(),
       debug: flags.debug || undefined,
@@ -134,7 +137,12 @@ async function planAndReport({ config, paths, flags }) {
   console.log(
     dim(
       `${result.ranked.length} eligible candidate(s); ` +
-        `${result.budget.slots} slot(s) at ${formatMoney(config.donationAmount, config.currency)} each` +
+        `${result.budget.slots} slot(s) at ${formatMoney(config.donationAmount, config.currency)}` +
+        (config.tipAmount > 0
+          ? ` + ${formatMoney(config.tipAmount, config.currency)} platform tip ` +
+            `(${formatMoney(result.budget.perRecipient, config.currency)})`
+          : '') +
+        ' each' +
         (flags.limit ? `, limited to ${flags.limit}` : ''),
     ),
   );
@@ -181,11 +189,16 @@ async function commandDonate({ config, paths, flags }) {
     return 0;
   }
 
-  const total = result.chosen.length * config.donationAmount;
+  // What the card is actually charged: the donations plus any platform tips.
+  const total = round2(result.chosen.length * result.budget.perRecipient);
   console.log('');
   const question =
     `Donate ${formatMoney(config.donationAmount, config.currency)} to each of ` +
-    `${result.chosen.length} recipient(s), ${bold(formatMoney(total, config.currency))} in total?`;
+    `${result.chosen.length} recipient(s)` +
+    (config.tipAmount > 0
+      ? `, plus ${formatMoney(config.tipAmount, config.currency)} each to the platform`
+      : '') +
+    `, ${bold(formatMoney(total, config.currency))} in total?`;
 
   if (!flags.yes) {
     if (!isInteractive()) fail('the confirmation prompt needs a terminal — pass --yes to skip it');
@@ -310,12 +323,15 @@ async function commandHistory({ config, paths }) {
   const budget = budgetFor({
     totalAmount: config.totalAmount,
     donationAmount: config.donationAmount,
+    tipAmount: config.tipAmount,
     spent: ledger.spentSince(since),
     maxRecipients: config.maxRecipients,
   });
   console.log('');
+  const tipped = entries.some((entry) => Number(entry.tip) > 0);
   console.log(
-    `  donated: ${formatMoney(budget.spent, config.currency)} · ` +
+    `  ${tipped ? 'donated, including platform tips' : 'donated'}: ` +
+      `${formatMoney(budget.spent, config.currency)} · ` +
       `remaining in this period: ${formatMoney(budget.remaining, config.currency)}`,
   );
   return 0;

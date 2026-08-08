@@ -52,13 +52,16 @@ const fakeBrowser = () => ({
  */
 function fakeDriver(outcomes) {
   const calls = [];
+  const prepared = [];
   return {
     calls,
+    prepared,
     driver: {
       id: 'fake',
-      async prepare() {
+      async prepare(page, options) {
         const outcome = outcomes.shift() ?? 'ok';
         calls.push(outcome);
+        prepared.push(options);
         if (outcome === 'throw') throw new Error('the form never rendered');
         return { filled: ['amount'], manual: [], url: 'https://example.com' };
       },
@@ -78,11 +81,12 @@ function tempLedger() {
 }
 
 const run = (recipients, outcomes, overrides = {}) => {
-  const { driver, calls } = fakeDriver(outcomes);
+  const { driver, calls, prepared } = fakeDriver(outcomes);
   const browser = fakeBrowser();
   const ledger = tempLedger();
   return {
     calls,
+    prepared,
     browser,
     ledger,
     promise: executeDonations({
@@ -193,6 +197,33 @@ test('the browser is closed even when the run aborts', async () => {
   });
   await promise;
   assert.equal(browser.closed, true);
+});
+
+test('the configured tip is handed to the driver and charged to the budget', async () => {
+  const { promise, prepared, ledger } = run([recipient(1)], ['ok'], { tipAmount: 2 });
+  const { results } = await promise;
+
+  assert.equal(prepared[0].amount, 10);
+  assert.equal(prepared[0].tip, 2, 'the driver is told what to put in the tip field');
+  assert.equal(results[0].amount, 10, 'the recipient still gets the donation amount');
+  assert.equal(results[0].tip, 2);
+  assert.equal(ledger.spentSince(new Date(Date.now() - 60_000)), 12, 'the card was charged both');
+});
+
+test('no tip is charged when none is configured', async () => {
+  const { promise, prepared, ledger } = run([recipient(1)], ['ok']);
+  await promise;
+
+  assert.equal(prepared[0].tip, 0);
+  assert.equal(ledger.spentSince(new Date(Date.now() - 60_000)), 10);
+});
+
+test('a failed donation records no tip either', async () => {
+  const { promise, ledger } = run([recipient(1)], ['no', 'no', 'no'], { tipAmount: 2 });
+  const { results } = await promise;
+
+  assert.equal(results[0].tip ?? 0, 0);
+  assert.equal(ledger.spentSince(new Date(Date.now() - 60_000)), 0);
 });
 
 test('the ledger never records the card', async () => {

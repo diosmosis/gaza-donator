@@ -64,11 +64,16 @@ export class Ledger {
     });
   }
 
-  /** Total successfully donated since `since`, in the ledger's currency. */
+  /**
+   * Total successfully charged to the card since `since`, in the ledger's
+   * currency. Platform tips are part of the charge, so they count against the
+   * budget alongside the donation itself. Entries written before tips existed
+   * have no `tip` field and contribute nothing extra.
+   */
   spentSince(since) {
     return this.since(since)
       .filter((entry) => entry.status === STATUS.SUCCESS)
-      .reduce((total, entry) => total + (Number(entry.amount) || 0), 0);
+      .reduce((total, entry) => total + chargeOf(entry), 0);
   }
 
   /** FQNs successfully donated to since `since`. */
@@ -89,6 +94,7 @@ export class Ledger {
    * @param {string} entry.campaignUrl
    * @param {string} entry.platform
    * @param {number} entry.amount
+   * @param {number} [entry.tip]   platform tip charged alongside the donation
    * @param {string} entry.currency
    * @param {string} entry.status  one of STATUS
    * @param {string} [entry.note]
@@ -100,6 +106,7 @@ export class Ledger {
       campaignUrl: entry.campaignUrl,
       platform: entry.platform,
       amount: entry.amount,
+      ...(entry.tip ? { tip: round2(entry.tip) } : {}),
       currency: entry.currency,
       status: entry.status,
       ...(entry.note ? { note: entry.note } : {}),
@@ -117,20 +124,33 @@ export class Ledger {
   }
 }
 
+/** What one successful attempt took off the card. */
+export function chargeOf(entry) {
+  return (Number(entry.amount) || 0) + (Number(entry.tip) || 0);
+}
+
 /**
  * Budget arithmetic for the current window.
  *
  * @param {object} options
  * @param {number} options.totalAmount    per-period cap
  * @param {number} options.donationAmount amount per recipient
+ * @param {number} [options.tipAmount]    platform tip per recipient
  * @param {number} options.spent          already donated this window
  * @param {number} options.maxRecipients
- * @returns {{remaining: number, slots: number, spent: number}}
+ * @returns {{remaining: number, slots: number, spent: number, perRecipient: number}}
  */
-export function budgetFor({ totalAmount, donationAmount, spent, maxRecipients }) {
+export function budgetFor({ totalAmount, donationAmount, tipAmount = 0, spent, maxRecipients }) {
   const remaining = Math.max(0, round2(totalAmount - spent));
-  const affordable = Math.floor(remaining / donationAmount + 1e-9);
-  return { spent: round2(spent), remaining, slots: Math.max(0, Math.min(affordable, maxRecipients)) };
+  // A tip is charged with every donation, so a slot costs both.
+  const perRecipient = round2(donationAmount + tipAmount);
+  const affordable = Math.floor(remaining / perRecipient + 1e-9);
+  return {
+    spent: round2(spent),
+    remaining,
+    perRecipient,
+    slots: Math.max(0, Math.min(affordable, maxRecipients)),
+  };
 }
 
 /** Money is compared and summed in this file; keep it free of float dust. */

@@ -4,12 +4,22 @@
 import fs from 'node:fs';
 import { PLATFORMS } from './url.js';
 import { resolvePaths } from './paths.js';
+import { round2 } from './ledger.js';
+import { formatMoney } from './report.js';
 
 export const DEFAULT_CONFIG = {
   /** Ceiling on donations inside one recurrence period, in `currency`. */
   totalAmount: 200,
   /** Amount handed to each individual recipient. */
   donationAmount: 10,
+  /**
+   * Optional tip to the fundraising platform itself, per donation, in
+   * `currency`. Both GoFundMe and Chuffed ask for one and default it to a
+   * nonzero value; 0 means "give the platform nothing", which is what the
+   * drivers enforce unless this is raised. It is charged to the same card, so
+   * it counts against `totalAmount`.
+   */
+  tipAmount: 0,
   currency: 'USD',
   /** How far back "least funded" looks, and the width of the budget window. */
   recurrence: 'weekly',
@@ -100,6 +110,25 @@ export function windowStart(config, now = new Date()) {
   return new Date(Math.floor(start / bucket) * bucket);
 }
 
+/**
+ * What one recipient actually costs the card: the donation plus the platform
+ * tip, if any.
+ */
+export function chargePerRecipient(config) {
+  return round2((Number(config.donationAmount) || 0) + (Number(config.tipAmount) || 0));
+}
+
+/**
+ * How many people this configuration would pay if the whole period budget were
+ * spent. This is the number the `maxRecipients` sanity check is about — it
+ * depends only on the configuration, not on what has already been donated.
+ */
+export function impliedRecipients(config) {
+  const charge = chargePerRecipient(config);
+  if (!(charge > 0)) return 0;
+  return Math.floor(config.totalAmount / charge + 1e-9);
+}
+
 function isPlainObject(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -120,8 +149,11 @@ export function validateConfig(config) {
 
   if (!(config.totalAmount > 0)) problems.push('totalAmount must be greater than 0');
   if (!(config.donationAmount > 0)) problems.push('donationAmount must be greater than 0');
-  if (config.donationAmount > config.totalAmount) {
-    problems.push('donationAmount cannot exceed totalAmount');
+  if (!(Number.isFinite(config.tipAmount) && config.tipAmount >= 0)) {
+    problems.push('tipAmount must be 0 or a positive amount');
+  }
+  if (chargePerRecipient(config) > config.totalAmount) {
+    problems.push('donationAmount (plus tipAmount) cannot exceed totalAmount');
   }
   if (!/^[A-Z]{3}$/.test(config.currency ?? '')) {
     problems.push('currency must be a 3 letter code, e.g. USD');
@@ -161,6 +193,31 @@ export function validateConfig(config) {
   if (problems.length > 0) {
     throw new Error(`invalid configuration:\n  - ${problems.join('\n  - ')}`);
   }
+
+  // The budget on its own would pay more people than maxRecipients allows, so
+  // the cap would silently swallow part of the budget every run. That is much
+  // more likely to be a typo in an amount than a deliberate choice, so stop
+  // here rather than quietly donating less than the configuration says.
+  //
+  // Deliberately after the throw above (so it reports against validated
+  // numbers) and deliberately without an escape hatch: no flag skips it, and
+  // every command loads its configuration through here.
+  const implied = impliedRecipients(config);
+  if (implied > config.maxRecipients) {
+    const money = (amount) => formatMoney(amount, config.currency);
+    const charge = chargePerRecipient(config);
+    const tipNote =
+      config.tipAmount > 0 ? ` plus a ${money(config.tipAmount)} platform tip (${money(charge)} each)` : '';
+    throw new Error(
+      `misconfigured budget: totalAmount ${money(config.totalAmount)} at ` +
+        `${money(config.donationAmount)} per recipient${tipNote} would pay up to ${implied} people, ` +
+        `but maxRecipients is ${config.maxRecipients}.\n` +
+        `  Raise maxRecipients to at least ${implied}, or lower totalAmount to at most ` +
+        `${money(round2(charge * config.maxRecipients))}, or raise donationAmount.\n` +
+        '  Stopping so nothing is donated against a configuration that may be a typo.',
+    );
+  }
+
   return config;
 }
 

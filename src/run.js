@@ -58,6 +58,7 @@ export async function planRun({
   const budget = budgetFor({
     totalAmount: config.totalAmount,
     donationAmount: config.donationAmount,
+    tipAmount: config.tipAmount,
     spent,
     maxRecipients: config.maxRecipients,
   });
@@ -134,7 +135,10 @@ export async function executeDonations({
       log(
         dim(
           `  received ${formatMoney(recipient.receivedInPeriod, config.currency)} this period · ` +
-            `donating ${formatMoney(config.donationAmount, config.currency)}`,
+            `donating ${formatMoney(config.donationAmount, config.currency)}` +
+            (config.tipAmount > 0
+              ? ` + ${formatMoney(config.tipAmount, config.currency)} tip to the platform`
+              : ''),
         ),
       );
 
@@ -188,6 +192,7 @@ async function donateOnce({ driver, recipient, config, card, browser, paths, log
       const prepared = await driver.prepare(page, {
         campaignUrl: recipient.campaignUrl,
         amount: config.donationAmount,
+        tip: config.tipAmount ?? 0,
         card,
         donor: config.donor,
         log,
@@ -237,6 +242,7 @@ function record(ledger, recipient, config, status, note) {
     campaignUrl: recipient.campaignUrl,
     platform: recipient.platform,
     amount: status === STATUS.SUCCESS ? round2(config.donationAmount) : 0,
+    tip: status === STATUS.SUCCESS ? round2(config.tipAmount ?? 0) : 0,
     currency: config.currency,
     status,
     note,

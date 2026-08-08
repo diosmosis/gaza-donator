@@ -124,7 +124,7 @@ export function renderTable(rows, columns) {
 }
 
 /** The plan table: who gets paid, and what they have received lately. */
-export function renderRecipients(chosen, { currency, donationAmount, periodLabel }) {
+export function renderRecipients(chosen, { currency, donationAmount, tipAmount = 0, periodLabel }) {
   const rows = chosen.map((candidate, index) => {
     const verification = candidate.verification;
     const raised = verification?.raisedTotal;
@@ -137,6 +137,7 @@ export function renderRecipients(chosen, { currency, donationAmount, periodLabel
       raised: raised === undefined || raised === null ? dim('—') : formatMoney(raised, currency),
       active: formatAge(candidate.lastActivityTime),
       give: green(formatMoney(donationAmount, currency)),
+      tip: dim(formatMoney(tipAmount, currency)),
     };
   });
 
@@ -149,6 +150,8 @@ export function renderRecipients(chosen, { currency, donationAmount, periodLabel
     { key: 'raised', header: 'page total', align: 'right' },
     { key: 'active', header: 'last post', align: 'right' },
     { key: 'give', header: 'donate', align: 'right' },
+    // Only worth a column when the platform is actually being tipped.
+    ...(tipAmount > 0 ? [{ key: 'tip', header: 'platform tip', align: 'right' }] : []),
   ]);
 }
 
@@ -171,6 +174,7 @@ export function renderRejections(rejected) {
 export function renderSummary(results, { currency, totalAmount, spentBefore }) {
   const succeeded = results.filter((result) => result.status === 'success');
   const donated = succeeded.reduce((sum, result) => sum + result.amount, 0);
+  const tipped = succeeded.reduce((sum, result) => sum + (result.tip ?? 0), 0);
 
   const rows = results.map((result) => ({
     who: result.fqn,
@@ -191,19 +195,22 @@ export function renderSummary(results, { currency, totalAmount, spentBefore }) {
     { key: 'note', header: 'note' },
   ]);
 
-  const remaining = Math.max(0, totalAmount - spentBefore - donated);
+  // Tips are charged to the same card, so they come out of the same budget.
+  const remaining = Math.max(0, totalAmount - spentBefore - donated - tipped);
   return [
     '',
     bold('Summary'),
     table,
     '',
     `  donated this run: ${bold(formatMoney(donated, currency))} to ${succeeded.length} recipient(s)`,
+    ...(tipped > 0 ? [`  tipped to the platforms: ${formatMoney(tipped, currency)}`] : []),
     `  remaining in this period: ${formatMoney(remaining, currency)} of ${formatMoney(totalAmount, currency)}`,
   ].join('\n');
 }
 
 /** `history` output. */
 export function renderHistory(entries, { currency }) {
+  const anyTips = entries.some((entry) => Number(entry.tip) > 0);
   const rows = entries
     .slice()
     .reverse()
@@ -211,6 +218,7 @@ export function renderHistory(entries, { currency }) {
       at: new Date(entry.at).toISOString().replace('T', ' ').slice(0, 16),
       who: entry.fqn ?? '?',
       amount: formatMoney(entry.amount, entry.currency ?? currency),
+      tip: dim(formatMoney(entry.tip ?? 0, entry.currency ?? currency)),
       status: entry.status === 'success' ? green(entry.status) : yellow(entry.status),
       note: dim([entry.dryRun ? 'dry-run' : '', entry.note ?? ''].filter(Boolean).join(' ')),
     }));
@@ -219,6 +227,7 @@ export function renderHistory(entries, { currency }) {
     { key: 'at', header: 'when (UTC)' },
     { key: 'who', header: 'recipient' },
     { key: 'amount', header: 'amount', align: 'right' },
+    ...(anyTips ? [{ key: 'tip', header: 'tip', align: 'right' }] : []),
     { key: 'status', header: 'status' },
     { key: 'note', header: 'note' },
   ]);

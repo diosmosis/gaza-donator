@@ -10,7 +10,7 @@
  * Selectors observed on the live site (2026-08). They are the first thing to
  * check if a run stops filling fields; see README.
  */
-import { clickFirst, findFirst, pageText, readText, typeInto } from '../browser.js';
+import { clickFirst, findFirst, pageText, readText, readValue, typeInto } from '../browser.js';
 import { fillStripeCard } from './stripe.js';
 
 export const SELECTORS = {
@@ -41,8 +41,19 @@ export const SELECTORS = {
     'input[type="checkbox"][id*="anon" i]',
   ],
   submitButton: ['button[type="submit"]', 'button[class*="donate" i]'],
-  /** Chuffed adds an optional contribution to itself; leave it at the user's choice but find it. */
-  tipInput: ['input[name*="tip" i]', 'input[name*="contribution" i]', 'select[name*="tip" i]'],
+  /**
+   * Chuffed adds an optional contribution to itself, pre-filled with a nonzero
+   * amount. These selectors are written from the page's conventions rather than
+   * observed, because the payment page only renders past a Cloudflare Turnstile
+   * challenge — if the tip lands on the "fill in yourself" list, this is the
+   * first thing to correct.
+   */
+  tipInput: [
+    'input[name*="tip" i]',
+    'input[name*="contribution" i]',
+    'input[id*="tip" i][type="text"]',
+    'input[id*="tip" i][type="number"]',
+  ],
 };
 
 const CLOSED_MARKERS = [
@@ -93,7 +104,7 @@ const driver = {
    *
    * @returns {Promise<{filled: string[], manual: string[], url: string}>}
    */
-  async prepare(page, { campaignUrl, amount, card, donor, log = () => {} }) {
+  async prepare(page, { campaignUrl, amount, tip = 0, card, donor, log = () => {} }) {
     if (!page.url().startsWith(campaignUrl)) {
       await page.goto(campaignUrl, { waitUntil: 'domcontentloaded' });
       await page.waitForNetworkIdle({ idleTime: 800, timeout: 20_000 }).catch(() => {});
@@ -125,6 +136,7 @@ const driver = {
     const track = (label, ok) => (ok ? filled : manual).push(label);
 
     track('amount', await typeInto(page, SELECTORS.amountInput, String(amount), { timeoutMs: 15_000 }));
+    track(tipLabel(tip), await setTip(page, tip));
     if (donor?.name) track('name', await typeInto(page, SELECTORS.nameInput, donor.name, { timeoutMs: 4000 }));
     if (donor?.email) track('email', await typeInto(page, SELECTORS.emailInput, donor.email, { timeoutMs: 4000 }));
 
@@ -147,6 +159,40 @@ const driver = {
     });
   },
 };
+
+/** What the tip step is called in the "filled" / "fill in yourself" lists. */
+export function tipLabel(tip) {
+  return Number(tip) > 0 ? `Chuffed tip set to ${Number(tip)}` : 'Chuffed tip zeroed';
+}
+
+/**
+ * Set Chuffed's contribution to itself to `tip` (0 by default).
+ *
+ * Only a free-text field is touched. If Chuffed is offering preset percentages
+ * in a dropdown or radio group, this reports failure so the user sets it
+ * themselves — guessing at a preset control risks charging an amount nobody
+ * asked for.
+ */
+async function setTip(page, tip) {
+  const amount = Number(tip) || 0;
+
+  const handle = await findFirst(page, SELECTORS.tipInput, { timeoutMs: 6000 });
+  if (!handle) return false;
+  let editable = false;
+  try {
+    editable = await handle.evaluate(
+      (el) => el.tagName === 'INPUT' && ['text', 'number', 'tel', ''].includes(el.type),
+    );
+  } catch {
+    return false;
+  } finally {
+    await handle.dispose();
+  }
+  if (!editable) return false;
+
+  if (!(await typeInto(page, SELECTORS.tipInput, String(amount), { timeoutMs: 5000 }))) return false;
+  return parseMoney(await readValue(page, SELECTORS.tipInput)) === amount;
+}
 
 async function readDonateHref(page) {
   // Only the href is read, and the button may be scrolled out of view.
