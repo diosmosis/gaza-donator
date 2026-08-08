@@ -141,6 +141,28 @@ export class GazaApi {
     });
   }
 
+  /**
+   * The same grouping with no time window: everything the API has ever
+   * recorded per account. Used as the secondary ranking key, so that among the
+   * many people who received nothing this period, those who have raised least
+   * overall come first.
+   *
+   * This is *not* the campaign page's own lifetime figure — it counts only the
+   * donations gaza.onl has observed, and the two diverge in both directions.
+   * It orders the field cheaply; the scraped page total decides the final
+   * order, in `selectRecipients`.
+   *
+   * @returns {Promise<{data: object, cached: boolean}>} a CampaignStats envelope
+   */
+  async getAccountLifetimeStats({ currency = 'USD' } = {}) {
+    return this.#get('/api/v1/campaigns/accounts', {
+      group_by: 'account.url',
+      sort: 'amount',
+      currency,
+      hide_inactive: true,
+    });
+  }
+
   /** Recent donations for one account, newest first. Used for spot checks. */
   async getAccountDonations(account, { startTime, limit = 50, currency = 'USD' } = {}) {
     return this.#get(`/api/v1/campaigns/accounts/${encodeURIComponent(account)}/donations`, {

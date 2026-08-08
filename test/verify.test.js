@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { checkGazaVerified } from '../src/verify.js';
+import { checkGazaVerified, inConfiguredCurrency } from '../src/verify.js';
 
 const withCampaign = readFileSync(
   new URL('./fixtures/gaza-verified-with-campaign.html', import.meta.url),
@@ -106,4 +106,52 @@ test('a network failure is reported, not thrown', async () => {
   });
   assert.equal(result.ok, false);
   assert.match(result.note, /ECONNRESET/);
+});
+
+/** Converting a campaign's own total into the currency the ranking uses. */
+
+const convertUsd = async (amount, from) => {
+  const rates = { AUD: 1.4204, EUR: 0.86693 };
+  return rates[from] ? amount / rates[from] : null;
+};
+
+test('a total already in the configured currency is used as it stands', async () => {
+  const result = await inConfiguredCurrency(
+    { raisedTotal: 3640, raisedCurrency: 'USD' },
+    'USD',
+    convertUsd,
+  );
+  assert.deepEqual(result, { amount: 3640, original: 3640, currency: 'USD' });
+});
+
+test('a total in another currency is converted before it is ranked on', async () => {
+  // The Chuffed campaign that displays "$942" is in AUD.
+  const result = await inConfiguredCurrency(
+    { raisedTotal: 942, raisedCurrency: 'AUD' },
+    'USD',
+    convertUsd,
+  );
+  assert.equal(result.amount, 663.19);
+  assert.equal(result.original, 942, 'the page figure is kept for display');
+  assert.equal(result.currency, 'AUD');
+});
+
+test('a total whose currency is unknown is not ranked on at all', async () => {
+  const result = await inConfiguredCurrency({ raisedTotal: 500, raisedCurrency: null }, 'USD', convertUsd);
+
+  assert.equal(result.amount, null, 'ranking on an unknown unit is worse than not ranking on it');
+  assert.equal(result.original, 500);
+  assert.match(result.note, /does not say in which currency/);
+});
+
+test('a currency the rates do not cover is reported, not guessed', async () => {
+  const result = await inConfiguredCurrency({ raisedTotal: 500, raisedCurrency: 'XYZ' }, 'USD', convertUsd);
+
+  assert.equal(result.amount, null);
+  assert.match(result.note, /could not convert the campaign total from XYZ to USD/);
+});
+
+test('a page with no total at all stays empty', async () => {
+  const result = await inConfiguredCurrency({ raisedTotal: null }, 'USD', convertUsd);
+  assert.deepEqual(result, { amount: null, original: null, currency: null });
 });

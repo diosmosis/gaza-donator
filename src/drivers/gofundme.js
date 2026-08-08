@@ -14,6 +14,7 @@
  * Selectors observed on the live site (2026-08); see README if they rot.
  */
 import { clickFirst, clickMatching, findFirst, pageText, readValue, settle, typeInto } from '../browser.js';
+import { parseMoney } from '../money.js';
 import { waitForThanks } from './chuffed.js';
 
 export const SELECTORS = {
@@ -56,11 +57,24 @@ export function donateUrl(campaignUrl) {
 
 /** "$12,345 raised of $50,000 goal" -> 12345 */
 export function parseRaised(text) {
+  return parseRaisedWithCurrency(text)?.amount ?? null;
+}
+
+/**
+ * The same, keeping the currency.
+ *
+ * GoFundMe writes the symbol into the progress line — "€6,909 raised of
+ * €20,000" — and distinguishes the dollars it supports (CA$, A$, MX$), so a
+ * bare "$" means USD.
+ *
+ * @returns {{amount: number, currency: string|null}|null}
+ */
+export function parseRaisedWithCurrency(text) {
   if (!text) return null;
-  const match = String(text).replace(/,/g, '').match(/([\d.]+)\s*(k|m)?\s*(?:raised|of)/i);
-  if (!match) return null;
-  const scale = match[2]?.toLowerCase() === 'k' ? 1000 : match[2]?.toLowerCase() === 'm' ? 1e6 : 1;
-  return Number(match[1]) * scale;
+  const match = String(text)
+    .replace(/,/g, '')
+    .match(/((?:[A-Z]{0,2}\$|€|£|¥|₪|₹|R\$|kr)?\s*[\d.]+\s*[km]?)\s*(?:raised|of)/i);
+  return match ? parseMoney(match[1], { defaultCurrency: 'USD' }) : null;
 }
 
 /** The amount field formats itself ("$10.00"); compare on the number. */
@@ -98,7 +112,13 @@ const driver = {
     const closed = CLOSED_MARKERS.find((marker) => text.includes(marker));
     if (closed) return { ok: false, note: `campaign appears closed ("${closed}")` };
 
-    return { ok: true, raisedTotal: parseRaised(text), payUrl: donateUrl(campaignUrl) };
+    const raised = parseRaisedWithCurrency(text);
+    return {
+      ok: true,
+      raisedTotal: raised?.amount ?? null,
+      raisedCurrency: raised?.currency ?? null,
+      payUrl: donateUrl(campaignUrl),
+    };
   },
 
   async prepare(page, { campaignUrl, amount, tip = 0, card, donor }) {

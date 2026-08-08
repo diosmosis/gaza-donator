@@ -11,6 +11,7 @@
  * check if a run stops filling fields; see README.
  */
 import { clickFirst, findFirst, pageText, readText, readValue, typeInto } from '../browser.js';
+import { parseMoney as parseMoneyWithCurrency } from '../money.js';
 import { fillStripeCard } from './stripe.js';
 
 export const SELECTORS = {
@@ -67,9 +68,40 @@ const CLOSED_MARKERS = [
 
 /** "$3,439" -> 3439 */
 export function parseMoney(text) {
-  if (!text) return null;
-  const match = String(text).replace(/,/g, '').match(/(\d+(?:\.\d+)?)/);
-  return match ? Number(match[1]) : null;
+  return parseMoneyWithCurrency(text)?.amount ?? null;
+}
+
+/**
+ * Chuffed renders every currency with a bare "$" — a campaign in AUD and one
+ * in USD look identical on the page — so the symbol says nothing and the
+ * campaign's real currency has to come from `readCurrency`.
+ */
+export function parseChuffedMoney(text) {
+  return parseMoneyWithCurrency(text);
+}
+
+/**
+ * The campaign's currency, taken from the GraphQL traffic the page makes to
+ * render itself.
+ *
+ * There is no currency anywhere in the rendered page: `$942` on one campaign is
+ * AUD and `$3,640` on another is USD. The only statement of it that reaches the
+ * browser is the API response behind the page, so `inspect` listens for it.
+ *
+ * @param {string[]} bodies GraphQL response bodies seen while loading
+ * @returns {string|null}
+ */
+export function currencyFromGraphql(bodies) {
+  const counts = new Map();
+  for (const body of bodies) {
+    for (const [, code] of String(body).matchAll(/"currency":"([A-Z]{3})"/g)) {
+      counts.set(code, (counts.get(code) ?? 0) + 1);
+    }
+  }
+  if (counts.size === 0) return null;
+  // Donations in other currencies can appear alongside; the campaign's own is
+  // the one the page repeats.
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
 }
 
 const driver = {
@@ -83,20 +115,40 @@ const driver = {
    * @returns {Promise<{ok: boolean, note?: string, raisedTotal?: number|null, payUrl?: string|null}>}
    */
   async inspect(page, campaignUrl) {
-    const response = await page.goto(campaignUrl, { waitUntil: 'domcontentloaded' });
-    const status = response?.status() ?? 0;
-    if (status >= 400) return { ok: false, note: `campaign page returned HTTP ${status}` };
+    // Attached before navigating: the campaign's currency is only ever stated
+    // in the GraphQL traffic behind the page.
+    const graphql = [];
+    const onResponse = async (response) => {
+      if (!/\/api\/graphql/.test(response.url())) return;
+      const body = await response.text().catch(() => '');
+      if (body) graphql.push(body);
+    };
+    page.on('response', onResponse);
 
-    await page.waitForNetworkIdle({ idleTime: 800, timeout: 20_000 }).catch(() => {});
+    try {
+      const response = await page.goto(campaignUrl, { waitUntil: 'domcontentloaded' });
+      const status = response?.status() ?? 0;
+      if (status >= 400) return { ok: false, note: `campaign page returned HTTP ${status}` };
 
-    const text = await pageText(page);
-    const closed = CLOSED_MARKERS.find((marker) => text.includes(marker));
-    if (closed) return { ok: false, note: `campaign appears closed ("${closed}")` };
+      await page.waitForNetworkIdle({ idleTime: 800, timeout: 20_000 }).catch(() => {});
 
-    const payUrl = await readDonateHref(page);
-    if (!payUrl) return { ok: false, note: 'no donate button on the campaign page' };
+      const text = await pageText(page);
+      const closed = CLOSED_MARKERS.find((marker) => text.includes(marker));
+      if (closed) return { ok: false, note: `campaign appears closed ("${closed}")` };
 
-    return { ok: true, raisedTotal: await readRaised(page), payUrl };
+      const payUrl = await readDonateHref(page);
+      if (!payUrl) return { ok: false, note: 'no donate button on the campaign page' };
+
+      const raised = await readRaised(page);
+      return {
+        ok: true,
+        raisedTotal: raised?.amount ?? null,
+        raisedCurrency: currencyFromGraphql(graphql) ?? raised?.currency ?? null,
+        payUrl,
+      };
+    } finally {
+      page.off('response', onResponse);
+    }
   },
 
   /**
@@ -209,10 +261,28 @@ async function readDonateHref(page) {
   }
 }
 
-async function readRaised(page) {
-  // The raised figure sits in an animated counter that measures zero until the
-  // animation runs, so read it without a visibility check.
-  return parseMoney(await readText(page, SELECTORS.raised, { timeoutMs: 8000 }));
+/**
+ * The raised figure sits in a counter that animates upwards from zero, so a
+ * single read returns whatever it happened to be passing through — $2,297 on a
+ * campaign that has raised $3,640. Read it until it stops moving.
+ *
+ * (It also measures zero until the animation runs, hence `visible: false`.)
+ */
+async function readRaised(page, { timeoutMs = 12_000, stableMs = 700 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let previous = null;
+
+  do {
+    const current = parseChuffedMoney(
+      await readText(page, SELECTORS.raised, { timeoutMs: 4000 }),
+    );
+    if (current && previous && current.amount === previous.amount) return current;
+    previous = current;
+    await new Promise((resolve) => setTimeout(resolve, stableMs));
+  } while (Date.now() < deadline);
+
+  // Still moving when time ran out: the largest seen is the closest to final.
+  return previous;
 }
 
 /**

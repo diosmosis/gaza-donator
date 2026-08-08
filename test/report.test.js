@@ -82,6 +82,17 @@ test('an empty table says so instead of rendering headers over nothing', () => {
   assert.match(renderRejections([]), /none/);
 });
 
+test('one enormous rejection reason does not set the width of the table', () => {
+  const rendered = renderRejections([
+    { reason: `unparseable link: ${'<span class="invisible">x</span>'.repeat(20)}` },
+    { reason: 'no campaign link' },
+  ]);
+  for (const line of rendered.split('\n')) {
+    assert.ok(displayWidth(line) < 120, `line too wide: ${displayWidth(line)}`);
+  }
+  assert.match(rendered, /unparseable link/);
+});
+
 test('rejections are grouped by reason, most common first', () => {
   const rendered = renderRejections([
     { reason: 'no campaign link' },

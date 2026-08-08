@@ -113,7 +113,14 @@ export async function checkGazaVerified(
  * @param {(message: string) => void} [options.log]
  * @returns {(candidate: object) => Promise<{ok: boolean, note?: string, warnings: string[], raisedTotal?: number|null}>}
  */
-export function createVerifier({ config, browser, cache = null, log = () => {}, fetchImpl }) {
+export function createVerifier({
+  config,
+  browser,
+  cache = null,
+  log = () => {},
+  fetchImpl,
+  convert = null,
+}) {
   const checks = config.verify ?? {};
 
   return async function verify(candidate) {
@@ -152,15 +159,25 @@ export function createVerifier({ config, browser, cache = null, log = () => {}, 
         return { ok: false, note: inspection.note ?? 'campaign check failed', warnings };
       }
 
+      // Campaigns run in their own currencies — a Chuffed page showing "$942"
+      // may be AUD — and the totals are a ranking key, so they are converted
+      // into the configured currency before anything compares them. A total
+      // that cannot be converted is not reported at all: ranking on an unknown
+      // unit is worse than falling back to the API's figure.
+      const page = await inConfiguredCurrency(inspection, config.currency, convert);
+      if (page.note) warnings.push(page.note);
+
       if (checks.raisedTotal) {
-        const divergence = raisedDivergence(inspection.raisedTotal, candidate.receivedInPeriod);
+        const divergence = raisedDivergence(page.amount, candidate.receivedInPeriod);
         if (divergence) warnings.push(divergence);
       }
 
       return {
         ok: true,
         warnings,
-        raisedTotal: inspection.raisedTotal ?? null,
+        raisedTotal: page.amount,
+        raisedOriginal: page.original,
+        raisedCurrency: page.currency,
         payUrl: inspection.payUrl ?? null,
       };
     };
@@ -171,6 +188,40 @@ export function createVerifier({ config, browser, cache = null, log = () => {}, 
     if (cached) log(`  (verification for ${candidate.fqn} served from cache)`);
     return value;
   };
+}
+
+/**
+ * Express a campaign's own raised total in the configured currency.
+ *
+ * @returns {Promise<{amount: number|null, original: number|null, currency: string|null, note?: string}>}
+ */
+export async function inConfiguredCurrency(inspection, currency, convert) {
+  const original = inspection?.raisedTotal ?? null;
+  const from = inspection?.raisedCurrency ?? null;
+  if (original === null) return { amount: null, original: null, currency: null };
+
+  const target = String(currency ?? 'USD').toUpperCase();
+  if (!from) {
+    return {
+      amount: null,
+      original,
+      currency: null,
+      note: `campaign page shows ${original} but does not say in which currency, so it was not ranked on`,
+    };
+  }
+  if (from === target) return { amount: original, original, currency: from };
+
+  const converted = convert ? await convert(original, from) : null;
+  if (converted === null) {
+    return {
+      amount: null,
+      original,
+      currency: from,
+      note: `could not convert the campaign total from ${from} to ${target}`,
+    };
+  }
+
+  return { amount: Math.round(converted * 100) / 100, original, currency: from };
 }
 
 /**

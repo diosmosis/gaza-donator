@@ -27,6 +27,16 @@ export const DEFAULT_CONFIG = {
   /** Hard cap on recipients per run, independent of the budget. */
   maxRecipients: 25,
   /**
+   * How many candidates to verify per slot before choosing.
+   *
+   * Verification scrapes each campaign page, which is where its own raised
+   * total comes from — the number the final ranking uses. A factor of 3
+   * shortlists three times as many people as will be paid and gives the money
+   * to the least-funded of them; 1 verifies only as many as are needed and
+   * leaves the API's ordering in charge. Higher is fairer and slower.
+   */
+  rankPoolFactor: 3,
+  /**
    * Home-instance suspension states to consider. LIMITED accounts are real
    * people whose instance has limited them; opt in deliberately.
    */
@@ -179,6 +189,9 @@ export function validateConfig(config) {
 
   if (!Number.isInteger(config.maxRecipients) || config.maxRecipients < 1) {
     problems.push('maxRecipients must be a positive integer');
+  }
+  if (!Number.isInteger(config.rankPoolFactor) || config.rankPoolFactor < 1) {
+    problems.push('rankPoolFactor must be an integer of 1 or more');
   }
   if (!Number.isInteger(config.retries) || config.retries < 0) {
     problems.push('retries must be a non-negative integer');

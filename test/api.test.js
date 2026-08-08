@@ -58,6 +58,19 @@ test('getAccountCampaignStats asks for the ranking the selection depends on', as
   assert.equal(url.searchParams.get('hide_inactive'), 'true');
 });
 
+test('getAccountLifetimeStats asks the same question with no time window', async () => {
+  const fetchImpl = stubFetch(() => jsonResponse(stats));
+  const api = new GazaApi({ fetch: fetchImpl });
+
+  await api.getAccountLifetimeStats();
+
+  const url = new URL(fetchImpl.calls[0]);
+  assert.equal(url.pathname, '/api/v1/campaigns/accounts');
+  assert.equal(url.searchParams.get('group_by'), 'account.url');
+  assert.equal(url.searchParams.has('start_time'), false, 'no window means everything on record');
+  assert.equal(url.searchParams.has('end_time'), false);
+});
+
 test('getAccounts hides inactive accounts by default', async () => {
   const fetchImpl = stubFetch(() => jsonResponse(accounts));
   const api = new GazaApi({ fetch: fetchImpl });

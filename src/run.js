@@ -10,6 +10,7 @@ import { BrowserSession } from './browser.js';
 import { Ledger, STATUS, budgetFor, round2 } from './ledger.js';
 import { buildCandidates, selectRecipients } from './select.js';
 import { createVerifier } from './verify.js';
+import { createConverter } from './fx.js';
 import { driverFor } from './drivers/index.js';
 import { recurrenceDays, windowStart } from './config.js';
 import { formatMoney, dim, yellow } from './report.js';
@@ -42,14 +43,17 @@ export async function planRun({
 
   log(dim(`window: donations since ${since.toISOString().slice(0, 10)} (${periodDays} days)`));
 
-  const [accountsResult, statsResult] = await Promise.all([
+  const [accountsResult, statsResult, lifetimeResult] = await Promise.all([
     api.getAccounts({ hideInactive: true }),
     api.getAccountCampaignStats({ startTime: since, currency: config.currency }),
+    // The secondary ranking key: what each account has raised in total.
+    api.getAccountLifetimeStats({ currency: config.currency }),
   ]);
   log(
     dim(
       `accounts: ${accountsResult.data.length} (${accountsResult.cached ? 'cached' : 'fresh'}), ` +
-        `donation stats: ${statsResult.cached ? 'cached' : 'fresh'}`,
+        `donation stats: ${statsResult.cached ? 'cached' : 'fresh'}, ` +
+        `lifetime totals: ${lifetimeResult.cached ? 'cached' : 'fresh'}`,
     ),
   );
 
@@ -64,7 +68,11 @@ export async function planRun({
   });
   const slots = limit === null ? budget.slots : Math.min(budget.slots, limit);
 
-  const candidates = buildCandidates(accountsResult.data, indexStatsByAccount(statsResult.data));
+  const candidates = buildCandidates(
+    accountsResult.data,
+    indexStatsByAccount(statsResult.data),
+    indexStatsByAccount(lifetimeResult.data),
+  );
 
   // No slots means nothing to verify, so do not pay to start a browser.
   const willVerify = verify && slots > 0;
@@ -74,7 +82,15 @@ export async function planRun({
       : null;
 
   try {
-    const verifier = willVerify ? createVerifier({ config, browser, cache, log }) : null;
+    // Campaign totals come back in the campaign's own currency; ranking them
+    // against each other means converting them all to the configured one.
+    const convert = createConverter({
+      base: config.currency,
+      cache,
+      log: (message) => log(dim(message)),
+    });
+
+    const verifier = willVerify ? createVerifier({ config, browser, cache, log, convert }) : null;
 
     const selection = await selectRecipients({
       candidates,
@@ -84,6 +100,8 @@ export async function planRun({
       alreadyDonated: ledger.recipientsSince(since),
       slots,
       verify: verifier,
+      poolFactor: config.rankPoolFactor,
+      log: (message) => log(dim(message)),
     });
 
     return { ...selection, budget, slots, since, periodDays, ledger, candidates };

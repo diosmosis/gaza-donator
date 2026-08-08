@@ -101,6 +101,20 @@ export class Cache {
     return { value, cached: false };
   }
 
+  /**
+   * The same cache with a different lifetime, for things that go stale more
+   * slowly than an API response — exchange rates, for instance.
+   */
+  withTtl(ttlMs) {
+    return new Cache({
+      dir: this.dir,
+      ttlMs,
+      read: this.readEnabled,
+      write: this.writeEnabled,
+      now: this.now,
+    });
+  }
+
   /** Delete every entry. Returns the number of files removed. */
   clear() {
     let removed = 0;

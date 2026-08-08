@@ -7,7 +7,7 @@
  * a way that avoids paying into abandoned campaigns, and works out how many
  * recipients the remaining budget covers.
  */
-import { detectPlatform } from './url.js';
+import { detectPlatform, extractLinks } from './url.js';
 import { parseApiTime } from './time.js';
 
 export const GAZA_VERIFIED_FIELD = 'Gaza Verified';
@@ -26,25 +26,39 @@ export const REASON = {
 /**
  * The gaza-verified.org profile link an account advertises, if any.
  * Its presence is what makes an account "Gaza Verified" for our purposes.
+ *
+ * Some instances serve profile fields as rendered HTML rather than as the bare
+ * value, so the anchor is unwrapped: ten of the current accounts are listed
+ * that way, and reading the markup as a URL rejected all of them.
  */
 export function gazaVerifiedUrl(account) {
   const fields = account?.profile_fields ?? {};
   const key = Object.keys(fields).find(
     (name) => name.trim().toLowerCase() === GAZA_VERIFIED_FIELD.toLowerCase(),
   );
-  return key ? fields[key] : null;
+  if (!key) return null;
+
+  const value = String(fields[key] ?? '').trim();
+  if (!value) return null;
+  if (!value.includes('<')) return value;
+
+  const [href] = extractLinks(value);
+  return href ?? null;
 }
 
 /**
  * Join the account roster with the per-window donation totals.
  *
- * @param {object[]} accounts  from GazaApi#getAccounts
- * @param {Map} statsIndex     from indexStatsByAccount
+ * @param {object[]} accounts     from GazaApi#getAccounts
+ * @param {Map} statsIndex        from indexStatsByAccount, over the window
+ * @param {Map} [lifetimeIndex]   the same, with no window: everything the API
+ *   has recorded for the account, used as the secondary ranking key
  * @returns {object[]} candidate records
  */
-export function buildCandidates(accounts, statsIndex) {
+export function buildCandidates(accounts, statsIndex, lifetimeIndex = new Map()) {
   return (accounts ?? []).map((account) => {
     const stats = statsIndex.get(account.url) ?? null;
+    const lifetime = lifetimeIndex.get(account.url) ?? null;
     return {
       fqn: account.fqn,
       displayName: account.display_name || account.username,
@@ -55,7 +69,9 @@ export function buildCandidates(accounts, statsIndex) {
       state: account.state ?? null,
       disabled: Boolean(account.disabled),
       receivedInPeriod: stats?.amount ?? 0,
-      currency: stats?.currency ?? 'USD',
+      /** Everything the API has ever recorded for this account. */
+      receivedTotal: lifetime?.amount ?? 0,
+      currency: stats?.currency ?? lifetime?.currency ?? 'USD',
       lastDonationTime: stats?.lastDonationTime ?? null,
       lastActivityTime: stats?.lastActivityTime ?? null,
       hasStats: stats !== null,
@@ -115,21 +131,62 @@ export function filterCandidates(
 /**
  * Least funded first.
  *
- * Many candidates tie at $0 for a short window, so the tie-break matters more
- * than the primary key: prefer accounts that have posted recently, since a
- * long-silent account is usually one whose owner has stopped campaigning (or
- * worse). Ties beyond that fall back to the account URL so runs are repeatable.
+ * Many candidates tie at $0 for a short window, so the tie-breaks matter more
+ * than the primary key:
+ *
+ *   1. received in this recurrence period, ascending — the rule from the spec
+ *   2. received in total, ascending — among people the crowd missed this week,
+ *      prefer the ones it has been missing all along
+ *   3. most recently active, descending — a long-silent account is usually one
+ *      whose owner has stopped campaigning (or worse)
+ *   4. account URL, so runs are repeatable
+ *
+ * `total` here is what the API has recorded, which is what we know about every
+ * candidate before scraping anything. `rankVerified` re-orders the shortlist on
+ * the campaign pages' own figures once those have been read.
  */
 export function rankCandidates(candidates) {
-  return [...candidates].sort((a, b) => {
-    if (a.receivedInPeriod !== b.receivedInPeriod) return a.receivedInPeriod - b.receivedInPeriod;
+  return [...candidates].sort(
+    (a, b) =>
+      a.receivedInPeriod - b.receivedInPeriod ||
+      (a.receivedTotal ?? 0) - (b.receivedTotal ?? 0) ||
+      byActivityThenUrl(a, b),
+  );
+}
 
-    const activityA = parseApiTime(a.lastActivityTime) || 0;
-    const activityB = parseApiTime(b.lastActivityTime) || 0;
-    if (activityA !== activityB) return activityB - activityA;
+function byActivityThenUrl(a, b) {
+  const activityA = parseApiTime(a.lastActivityTime) || 0;
+  const activityB = parseApiTime(b.lastActivityTime) || 0;
+  if (activityA !== activityB) return activityB - activityA;
+  return a.accountUrl < b.accountUrl ? -1 : a.accountUrl > b.accountUrl ? 1 : 0;
+}
 
-    return a.accountUrl < b.accountUrl ? -1 : a.accountUrl > b.accountUrl ? 1 : 0;
-  });
+/**
+ * How much this campaign has raised in total, best estimate.
+ *
+ * The campaign page's own figure when verification scraped it, the API's
+ * recorded total otherwise — never 0 just because a scrape failed, which would
+ * push a candidate we know nothing about to the front of the queue.
+ *
+ * Page totals are read in whatever currency the campaign runs in, so this is a
+ * close-enough comparison, not an exact one. It is a tie-break, not a payment.
+ */
+export function totalRaised(candidate) {
+  const scraped = candidate.verification?.raisedTotal;
+  return Number.isFinite(scraped) ? scraped : (candidate.receivedTotal ?? 0);
+}
+
+/**
+ * Final ordering of the verified shortlist, on the same keys as
+ * `rankCandidates` but with the scraped page totals in place of the API's.
+ */
+export function rankVerified(candidates) {
+  return [...candidates].sort(
+    (a, b) =>
+      a.receivedInPeriod - b.receivedInPeriod ||
+      totalRaised(a) - totalRaised(b) ||
+      byActivityThenUrl(a, b),
+  );
 }
 
 /**
@@ -137,10 +194,19 @@ export function rankCandidates(candidates) {
  *
  * `verify` is optional and async: it receives a candidate and returns
  * `{ok: boolean, note?: string, warnings?: string[], raisedTotal?: number}`.
- * Candidates are verified lazily, in rank order, so we only pay for the scrapes
- * we actually need — failures pull the next candidate up into the slot.
  *
- * @returns {Promise<{chosen: object[], rejected: object[], ranked: object[]}>}
+ * Selection is two-stage, because the campaign page's own raised total — the
+ * number worth ranking on — only exists once verification has scraped it, and
+ * scraping every candidate would mean hundreds of page loads:
+ *
+ *   1. rank everyone on what the API knows, and verify down that order until a
+ *      shortlist of `slots * poolFactor` candidates has passed,
+ *   2. re-rank that shortlist on the page totals now known, and take `slots`.
+ *
+ * `poolFactor` of 1 verifies exactly as many as are needed, which is the
+ * cheapest option and leaves the API's ordering in charge.
+ *
+ * @returns {Promise<{chosen: object[], rejected: object[], ranked: object[], pool: object[]}>}
  */
 export async function selectRecipients({
   candidates,
@@ -150,6 +216,8 @@ export async function selectRecipients({
   alreadyDonated,
   slots,
   verify = null,
+  poolFactor = 3,
+  log = () => {},
 }) {
   const { eligible, rejected } = filterCandidates(candidates, {
     platforms,
@@ -159,22 +227,36 @@ export async function selectRecipients({
   });
   const ranked = rankCandidates(eligible);
 
-  const chosen = [];
-  for (const candidate of ranked) {
-    if (chosen.length >= slots) break;
+  if (slots <= 0) return { chosen: [], rejected, ranked, pool: [] };
 
-    if (!verify) {
-      chosen.push({ ...candidate, verification: null });
-      continue;
-    }
+  // Without verification there are no page totals to re-rank on, so the API
+  // ordering is all there is.
+  if (!verify) {
+    const chosen = ranked.slice(0, slots).map((candidate) => ({ ...candidate, verification: null }));
+    return { chosen, rejected, ranked, pool: chosen };
+  }
+
+  const target = Math.min(ranked.length, Math.max(slots, slots * poolFactor));
+  const pool = [];
+  for (const candidate of ranked) {
+    if (pool.length >= target) break;
 
     const result = await verify(candidate);
     if (result?.ok) {
-      chosen.push({ ...candidate, verification: result });
+      pool.push({ ...candidate, verification: result });
     } else {
       rejected.push({ candidate, reason: result?.note ?? 'verification failed' });
     }
   }
 
-  return { chosen, rejected, ranked };
+  const ordered = rankVerified(pool);
+  const chosen = ordered.slice(0, slots);
+  if (ordered.length > chosen.length) {
+    log(
+      `shortlisted ${ordered.length} verified candidate(s) for ${slots} slot(s); ` +
+        'ranked by what each campaign has already raised',
+    );
+  }
+
+  return { chosen, rejected, ranked, pool: ordered };
 }

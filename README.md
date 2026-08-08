@@ -13,11 +13,33 @@ Dry run by default. Nothing is ever charged without both an explicit `donate` co
    verified people, a `Gaza Verified` profile field pointing at gaza-verified.org.
 2. `GET gaza.onl/api/v1/campaigns/accounts?group_by=account.url&start_time=…&sort=amount` — how much
    each account has received inside the current recurrence period, ascending. This *is* the ranking.
-3. Everyone without a Gaza Verified listing, without a campaign link, on an unsupported platform, on
+3. The same call with no time window — everything the API has ever recorded per account. This is the
+   secondary key.
+4. Everyone without a Gaza Verified listing, without a campaign link, on an unsupported platform, on
    a suspended/limited account, or already paid this period is dropped.
-4. Ties (many people sit at $0 over a short window) break towards **recent activity**, so money does
-   not flow into campaigns whose owner stopped posting months ago.
-5. Candidates are verified in rank order, only as far down as there are slots to fill.
+5. The order is: **least received this period**, then **least received in total**, then **most
+   recently active** (so money does not flow into campaigns whose owner stopped posting), then
+   account URL for repeatability.
+6. The top `rankPoolFactor` × slots candidates are verified — which scrapes each campaign page — and
+   that shortlist is then re-ranked on the pages' **own** raised totals before the money is assigned.
+
+Step 6 exists because the two totals disagree. The API only counts donations it has observed; the
+campaign page shows its own lifetime figure, and the two differ by several times in both directions.
+The API total is what can be known about all ~220 candidates cheaply, so it picks the shortlist; the
+page total is the truer number, so it decides the final order. Both are shown in the plan table.
+
+`rankPoolFactor` is the cost dial: 3 (the default) verifies three campaigns per slot and gives the
+money to the least-funded of them; 1 verifies only what is needed and leaves the API's order in
+charge. Verification results are cached for 15 minutes, so re-running is cheap.
+
+Campaigns do not all run in the same currency — a Chuffed page reading "$942" may be AUD, and plenty
+of GoFundMe campaigns are in EUR — so page totals are **converted into `currency` before they are
+compared**, using ECB rates (`frankfurter.dev`, falling back to `open.er-api.com`), cached for 12
+hours. The table shows the converted figure and names the currency it came from. A total whose
+currency cannot be established, or cannot be converted, is not ranked on at all: the candidate falls
+back to its API total rather than being ordered on a number that means nothing. Conversion only ever
+decides an order — what gets paid is `donationAmount` in `currency`, and the charge is the
+platform's own arithmetic.
 
 ## Verifying before spending
 
@@ -25,7 +47,7 @@ Dry run by default. Nothing is ever charged without both an explicit `donate` co
 | --- | --- | --- |
 | campaign is live | the campaign page itself | failure drops the candidate |
 | Gaza Verified listing | `gaza-verified.org/people/@user@instance/` | must exist and be about this account; if it *also* names a campaign, that campaign must be the one the API reported |
-| raised total | scraped from the campaign page | advisory only — shown beside the API figure |
+| raised total | scraped from the campaign page | never blocks — but it is the key the shortlist is finally ranked on, and a page total far below the API's earns a warning |
 
 gaza-verified.org frequently lists only the Mastodon account and no fundraiser link. That is normal
 and is not treated as a failure; it produces a warning saying there was nothing to compare against.
@@ -67,6 +89,7 @@ The file itself:
   "recurrence": "weekly",
   "platforms": ["chuffed", "gofundme"],
   "maxRecipients": 25,
+  "rankPoolFactor": 3,
   "includeStates": ["ACTIVE"],
   "excludeAccounts": [],
   "donor": {
@@ -148,7 +171,7 @@ summary, so a broken card or a blocked session cannot quietly burn through the b
 | card | `~/.config/palestine-donator/card.enc` |
 | ledger | `~/.local/share/palestine-donator/ledger.jsonl` |
 | browser profile | `~/.local/share/palestine-donator/browser-profile/` |
-| API + verification cache (15 min TTL) | `~/.cache/palestine-donator/` |
+| API + verification cache (15 min TTL, exchange rates 12 h) | `~/.cache/palestine-donator/` |
 
 Set `PALESTINE_DONATOR_HOME` to put all of it somewhere else. None of it lives in the repo.
 
@@ -158,7 +181,8 @@ Set `PALESTINE_DONATOR_HOME` to put all of it somewhere else. None of it lives i
 npm test
 ```
 
-130 tests, no network and no browser: selection and ranking, budget arithmetic over the ledger
+162 tests, no network and no browser: selection and both ranking stages, currency parsing and
+conversion, budget arithmetic over the ledger
 (including tips), the misconfigured-budget hard stop, config loading and editor resolution, card
 encryption, cache behaviour, API query construction against captured fixtures, the Gaza Verified
 check against real captured pages, the drivers' pure helpers, and the payment loop's retry and abort

@@ -128,13 +128,23 @@ export function renderRecipients(chosen, { currency, donationAmount, tipAmount =
   const rows = chosen.map((candidate, index) => {
     const verification = candidate.verification;
     const raised = verification?.raisedTotal;
+    // Converted totals are the ones ranked on; name the currency they came
+    // from so a surprising order can be checked against the page itself.
+    const raisedFrom =
+      verification?.raisedCurrency && verification.raisedCurrency !== currency
+        ? ` ${verification.raisedCurrency}`
+        : '';
     return {
       n: String(index + 1),
       who: truncate(candidate.displayName || candidate.fqn, 28),
       fqn: dim(candidate.fqn),
       platform: platformLabel(candidate.platform),
       received: formatMoney(candidate.receivedInPeriod, candidate.currency ?? currency),
-      raised: raised === undefined || raised === null ? dim('—') : formatMoney(raised, currency),
+      total: dim(formatMoney(candidate.receivedTotal ?? 0, candidate.currency ?? currency)),
+      raised:
+        raised === undefined || raised === null
+          ? dim('—')
+          : formatMoney(raised, currency) + dim(raisedFrom),
       active: formatAge(candidate.lastActivityTime),
       give: green(formatMoney(donationAmount, currency)),
       tip: dim(formatMoney(tipAmount, currency)),
@@ -147,6 +157,9 @@ export function renderRecipients(chosen, { currency, donationAmount, tipAmount =
     { key: 'fqn', header: 'account' },
     { key: 'platform', header: 'platform' },
     { key: 'received', header: `received ${periodLabel}`, align: 'right' },
+    // Both totals: the API's is what ranked the whole field, the page's is what
+    // decided the final order among the people who were verified.
+    { key: 'total', header: 'api total', align: 'right' },
     { key: 'raised', header: 'page total', align: 'right' },
     { key: 'active', header: 'last post', align: 'right' },
     { key: 'give', header: 'donate', align: 'right' },
@@ -155,14 +168,22 @@ export function renderRecipients(chosen, { currency, donationAmount, tipAmount =
   ]);
 }
 
-/** Grouped counts of why candidates were dropped. */
-export function renderRejections(rejected) {
+/**
+ * Grouped counts of why candidates were dropped.
+ *
+ * Reasons quote what a page said, so one of them can be a paragraph of markup;
+ * a single such reason would otherwise set the width of the whole table.
+ */
+export function renderRejections(rejected, { maxReasonWidth = 90 } = {}) {
   const counts = new Map();
   for (const { reason } of rejected) counts.set(reason, (counts.get(reason) ?? 0) + 1);
 
   const rows = [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
-    .map(([reason, count]) => ({ count: String(count), reason }));
+    .map(([reason, count]) => ({
+      count: String(count),
+      reason: truncate(String(reason).replace(/\s+/g, ' '), maxReasonWidth),
+    }));
 
   return renderTable(rows, [
     { key: 'count', header: 'count', align: 'right' },
