@@ -6,7 +6,18 @@
  * spends money when given --execute.
  */
 import { parseArgs } from 'node:util';
-import { loadConfig, recurrenceDays, windowStart } from '../src/config.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import {
+  DEFAULT_CONFIG,
+  configProblem,
+  describeConfig,
+  loadConfig,
+  recurrenceDays,
+  windowStart,
+} from '../src/config.js';
+import { editorCommand, openEditor } from '../src/editor.js';
+import { ensureDir, resolvePaths } from '../src/paths.js';
 import { Cache } from '../src/cache.js';
 import { CardStore, cardExpired, redactCard, validateCard } from '../src/card.js';
 import { Ledger, STATUS, budgetFor, round2 } from '../src/ledger.js';
@@ -49,6 +60,7 @@ the people who have received the least lately.
   ${bold('plan')}                 show who would be donated to (default, never pays)
   ${bold('donate')} [--execute]   donate; without --execute it stops at the confirmation
   ${bold('card')} set|status|clear   manage the encrypted card
+  ${bold('config')} edit|show|path   edit the config file in $EDITOR, or inspect it
   ${bold('history')}              show past donations
 
 Options
@@ -82,6 +94,14 @@ async function main() {
   }
 
   const [command = 'plan', ...rest] = positionals;
+
+  // Handled before the configuration is loaded, and so before it is validated:
+  // a config file that fails validation would otherwise lock the user out of
+  // the one command that can fix it. Nothing here can spend money.
+  if (command === 'config') {
+    return commandConfig({ file: flags.config, action: rest[0] ?? 'edit' });
+  }
+
   const { config, paths } = loadConfig({
     file: flags.config,
     overrides: cleanUndefined({
@@ -107,6 +127,7 @@ async function main() {
       return commandDonate({ config, paths, flags });
     case 'card':
       return commandCard({ paths, action: rest[0] ?? 'status' });
+    // `config` is handled above, before the configuration is validated.
     case 'history':
       return commandHistory({ config, paths });
     default:
@@ -307,6 +328,72 @@ async function commandCard({ paths, action }) {
     default:
       fail(`unknown card action "${action}" (use set, status or clear)`);
       return 2;
+  }
+}
+
+async function commandConfig({ file, action }) {
+  const configFile = file ?? resolvePaths().configFile;
+
+  switch (action) {
+    case 'path':
+      console.log(configFile);
+      return 0;
+
+    case 'show': {
+      const exists = fs.existsSync(configFile);
+      console.log(`${bold('config file')} ${configFile}${exists ? '' : dim(' (does not exist — showing defaults)')}`);
+      // Deliberately unvalidated: showing a broken configuration is the point.
+      const { config } = loadConfig({ file: exists ? configFile : undefined, validate: false });
+      console.log(JSON.stringify(config, null, 2));
+
+      const problem = exists ? configProblem(configFile) : null;
+      console.log('');
+      console.log(problem ? red(problem) : green(describeConfig(config)));
+      return problem ? 1 : 0;
+    }
+
+    case 'edit':
+      return editConfig(configFile);
+
+    default:
+      fail(`unknown config action "${action}" (use edit, show or path)`);
+      return 2;
+  }
+}
+
+/** Open the config in $EDITOR, then check what came back before walking away. */
+async function editConfig(configFile) {
+  if (!fs.existsSync(configFile)) {
+    ensureDir(path.dirname(configFile));
+    fs.writeFileSync(configFile, `${JSON.stringify(DEFAULT_CONFIG, null, 2)}\n`);
+    console.log(dim(`created ${configFile} with the defaults`));
+  }
+
+  const editor = editorCommand();
+  if (!editor) fail(`no editor found — set $EDITOR, or edit ${configFile} directly`);
+  if (!isInteractive()) fail(`an editor needs a terminal — edit ${configFile} directly`);
+
+  for (;;) {
+    const status = openEditor(editor, configFile);
+    if (status !== 0) console.log(yellow(`${editor[0]} exited with status ${status}`));
+
+    const problem = configProblem(configFile);
+    if (!problem) {
+      const { config } = loadConfig({ file: configFile });
+      console.log(green(`saved ${configFile}`));
+      console.log(`  ${describeConfig(config)}`);
+      return 0;
+    }
+
+    // A config that does not validate is not a config: say so now rather than
+    // at the start of the next run that wanted to donate.
+    console.log('');
+    console.log(red(problem));
+    console.log('');
+    if (!(await confirm('Re-open the editor to fix it?', { defaultYes: true }))) {
+      console.log(yellow(`Left ${configFile} as it is. Commands that spend money will refuse to run.`));
+      return 1;
+    }
   }
 }
 

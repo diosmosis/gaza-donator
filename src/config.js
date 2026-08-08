@@ -228,8 +228,11 @@ export function validateConfig(config) {
  * @param {string} [options.file]      explicit config path (--config)
  * @param {object} [options.overrides] CLI overrides, highest precedence
  * @param {object} [options.env]
+ * @param {boolean} [options.validate] only `config show` turns this off, so it
+ *   can display a broken configuration instead of refusing to start. Nothing
+ *   that spends money may pass false.
  */
-export function loadConfig({ file, overrides = {}, env = process.env } = {}) {
+export function loadConfig({ file, overrides = {}, env = process.env, validate = true } = {}) {
   const paths = resolvePaths(env);
   const configFile = file ?? paths.configFile;
 
@@ -254,6 +257,30 @@ export function loadConfig({ file, overrides = {}, env = process.env } = {}) {
     throw new Error(`config file not found: ${configFile}`);
   }
 
-  const config = validateConfig(merge(merge(DEFAULT_CONFIG, fromFile), overrides));
+  const merged = merge(merge(DEFAULT_CONFIG, fromFile), overrides);
+  const config = validate ? validateConfig(merged) : merged;
   return { config, paths, configFile, fileExists };
+}
+
+/**
+ * Why the configuration at `file` is not usable, or null if it is fine.
+ * Used by `config edit` to check the user's work before they walk away from it.
+ */
+export function configProblem(file) {
+  try {
+    loadConfig({ file });
+    return null;
+  } catch (err) {
+    return err.message;
+  }
+}
+
+/** One line describing what a configuration will do, for `config edit`. */
+export function describeConfig(config) {
+  const money = (amount) => formatMoney(amount, config.currency);
+  const tip = config.tipAmount > 0 ? ` + ${money(config.tipAmount)} platform tip` : '';
+  return (
+    `${money(config.totalAmount)} per ${config.recurrence}, ${money(config.donationAmount)}${tip} each — ` +
+    `up to ${impliedRecipients(config)} recipient(s) per period, cap ${config.maxRecipients}`
+  );
 }

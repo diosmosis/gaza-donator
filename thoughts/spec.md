@@ -49,6 +49,13 @@ more likely to be a typo in an amount than a deliberate choice.
 This check has no escape hatch: no flag skips it, and every command — `plan`, `donate`, `history`,
 `card` — loads its configuration through the same validation.
 
+The one exception is the `config` command, which is dispatched *before* the configuration is loaded
+and so before it is validated. Otherwise a value that fails validation would lock the user out of
+the only command that can repair it. `config` cannot spend money: `config edit` opens the file in
+`$VISUAL`/`$EDITOR` (writing the defaults first if there is none), then validates what came back and
+offers to re-open if it will not run; `config show` prints the effective configuration together with
+any validation error; `config path` prints the path.
+
 ## Recipients
 
 Recipients must all be **Gaza Verified**, and among those, the people who received the least in the
@@ -164,8 +171,9 @@ charged in this window, and who has already been paid.
 Node.js 20+, ESM, no runtime dependency except Puppeteer. Tests use the built-in `node:test`.
 
 ```
-bin/donate.js             CLI: plan | donate | card set|status|clear | history
+bin/donate.js             CLI: plan | donate | card | config | history
 src/config.js             defaults <- file <- flags, validation, recurrence window
+src/editor.js             locating and running $VISUAL/$EDITOR for `config edit`
 src/paths.js              where config, cache, data and the browser profile live
 src/cache.js              15-minute TTL disk cache, sha256 keys over sorted params
 src/api.js                gaza.onl client
@@ -196,9 +204,10 @@ because it does not render past Turnstile in a headless browser.
 
 ## Tests
 
-123 tests, no network and no browser: selection and ranking, budget arithmetic over the ledger
-including tips, the misconfigured-budget hard stop, card encryption, cache behaviour, API query
-construction against captured fixtures, the Gaza Verified check against real captured pages, the
-drivers' pure helpers, and the payment loop's retry and abort rules driven through a fake browser.
+130 tests, no network and no browser: selection and ranking, budget arithmetic over the ledger
+including tips, the misconfigured-budget hard stop, config loading and editor resolution, card
+encryption, cache behaviour, API query construction against captured fixtures, the Gaza Verified
+check against real captured pages, the drivers' pure helpers, and the payment loop's retry and abort
+rules driven through a fake browser.
 
 The browser paths are verified by running `plan` against the live sites.

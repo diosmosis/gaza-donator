@@ -6,6 +6,8 @@ import path from 'node:path';
 import {
   DEFAULT_CONFIG,
   chargePerRecipient,
+  configProblem,
+  describeConfig,
   impliedRecipients,
   loadConfig,
   recurrenceDays,
@@ -192,6 +194,40 @@ test('loadConfig explains a malformed config file', () => {
   fs.writeFileSync(paths.configFile, '{ nope');
 
   assert.throws(() => loadConfig({ env: { PALESTINE_DONATOR_HOME: home } }), /not valid JSON/);
+});
+
+test('configProblem reports what `config edit` has to tell the user', () => {
+  const home = tempHome();
+  const paths = resolvePaths({ PALESTINE_DONATOR_HOME: home });
+  fs.mkdirSync(paths.configDir, { recursive: true });
+
+  fs.writeFileSync(paths.configFile, JSON.stringify({ totalAmount: 100, donationAmount: 10 }));
+  assert.equal(configProblem(paths.configFile), null);
+
+  fs.writeFileSync(paths.configFile, '{ oops');
+  assert.match(configProblem(paths.configFile), /not valid JSON/);
+
+  fs.writeFileSync(paths.configFile, JSON.stringify({ totalAmount: 400, donationAmount: 5 }));
+  assert.match(configProblem(paths.configFile), /misconfigured budget/);
+});
+
+test('a configuration can be read back without validation, so a broken one can be shown', () => {
+  const home = tempHome();
+  const paths = resolvePaths({ PALESTINE_DONATOR_HOME: home });
+  fs.mkdirSync(paths.configDir, { recursive: true });
+  fs.writeFileSync(paths.configFile, JSON.stringify({ totalAmount: 400, donationAmount: 5 }));
+
+  const { config } = loadConfig({ env: { PALESTINE_DONATOR_HOME: home }, validate: false });
+  assert.equal(config.totalAmount, 400, 'shown as written, not rejected');
+  assert.throws(() => loadConfig({ env: { PALESTINE_DONATOR_HOME: home } }), /misconfigured budget/);
+});
+
+test('describeConfig says what the configuration will actually do', () => {
+  assert.equal(
+    describeConfig({ ...DEFAULT_CONFIG }),
+    '$200.00 per weekly, $10.00 each — up to 20 recipient(s) per period, cap 25',
+  );
+  assert.match(describeConfig({ ...DEFAULT_CONFIG, tipAmount: 1 }), /\$1\.00 platform tip each — up to 18/);
 });
 
 test('state lives outside the repo, in per-purpose directories', () => {

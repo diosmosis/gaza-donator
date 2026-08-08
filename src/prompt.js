@@ -1,5 +1,7 @@
 /** Interactive prompts on stdin/stdout. */
-import readline from 'node:readline';
+// The promise-based readline: the callback API's `question` returns undefined,
+// so awaiting it yields nothing to trim.
+import readline from 'node:readline/promises';
 
 export function isInteractive() {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);

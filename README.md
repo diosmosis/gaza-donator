@@ -42,7 +42,21 @@ encrypted with AES-256-GCM under a passphrase you choose and stored at
 `~/.config/palestine-donator/card.enc`, mode 0600. It is decrypted into memory for the duration of a
 run and never written to the ledger, the cache, logs or debug screenshots.
 
-Optional config at `~/.config/palestine-donator/config.json`:
+Configuration lives at `~/.config/palestine-donator/config.json` and is optional — the defaults are
+usable. To edit it:
+
+```sh
+node bin/donate.js config edit    # $VISUAL/$EDITOR, creating the file if needed
+node bin/donate.js config show    # the effective configuration, and whether it is valid
+node bin/donate.js config path    # just the path
+```
+
+`config edit` writes the defaults first if there is no file yet, and checks your work when the
+editor exits: if what you saved will not run, it says why and offers to re-open. It is also the one
+command that still works when the configuration is invalid — otherwise a bad value would lock you
+out of the only thing that can fix it.
+
+The file itself:
 
 ```json
 {
@@ -87,7 +101,8 @@ error: misconfigured budget: totalAmount $200.00 at $5.00 per recipient would pa
 Otherwise the cap would silently swallow the rest of the budget every run, which is far more likely
 to be a typo in an amount than a deliberate choice. **There is no flag that skips this check** —
 every command loads its configuration through the same validation, so `plan`, `donate`, `history`
-and `card` all stop until the numbers agree.
+and `card` all stop until the numbers agree. The one exception is the `config` command itself, which
+runs before validation so you can repair the file; it cannot spend money.
 
 ## Use
 
@@ -97,6 +112,7 @@ node bin/donate.js donate                    # plan + confirmation prompt, then 
 node bin/donate.js donate --execute          # actually donate
 node bin/donate.js donate --execute --limit 1   # one recipient, for a first run
 node bin/donate.js history                   # what has been donated this period
+node bin/donate.js config edit               # change the settings
 ```
 
 Useful flags: `--total`, `--amount`, `--tip`, `--period weekly|monthly|10d`, `--limit`, `--yes`,
@@ -142,10 +158,11 @@ Set `PALESTINE_DONATOR_HOME` to put all of it somewhere else. None of it lives i
 npm test
 ```
 
-123 tests, no network and no browser: selection and ranking, budget arithmetic over the ledger
-(including tips), the misconfigured-budget hard stop, card encryption, cache behaviour, API query
-construction against captured fixtures, the Gaza Verified check against real captured pages, the
-drivers' pure helpers, and the payment loop's retry and abort rules driven through a fake browser.
+130 tests, no network and no browser: selection and ranking, budget arithmetic over the ledger
+(including tips), the misconfigured-budget hard stop, config loading and editor resolution, card
+encryption, cache behaviour, API query construction against captured fixtures, the Gaza Verified
+check against real captured pages, the drivers' pure helpers, and the payment loop's retry and abort
+rules driven through a fake browser.
 
 The browser paths are verified by running against the live sites:
 
