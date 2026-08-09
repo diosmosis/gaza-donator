@@ -48,7 +48,7 @@ donation). Otherwise the cap would silently swallow part of the budget on every 
 more likely to be a typo in an amount than a deliberate choice.
 
 This check has no escape hatch: no flag skips it, and every command — `plan`, `donate`, `check`,
-`history`, `card` — loads its configuration through the same validation.
+`gates`, `history`, `card` — loads its configuration through the same validation.
 
 The one exception is the `config` command, which is dispatched *before* the configuration is loaded
 and so before it is validated. Otherwise a value that fails validation would lock the user out of
@@ -206,6 +206,33 @@ quietly burn through the budget. Only confirmed donations are recorded as spent.
 `plan` never opens a payment page. `donate` re-runs the plan, asks for confirmation, and then still
 refuses to pay without an explicit `--execute`.
 
+## Bot gates
+
+One gate is designed for: Chuffed's payment page is behind a Cloudflare Turnstile challenge, and the
+assisted donation flow exists because of it. Everywhere else a challenge is a finding, because it is
+**indistinguishable from the failures it is not**. A gated page has no donate button and no raised
+total, so being blocked reads as "the selector rotted" or as "this campaign is closed" — and in the
+second case the person is dropped from selection without anyone noticing.
+
+Every page load is therefore tested for one (`src/gates.js`), by three kinds of evidence:
+
+| evidence | example |
+| --- | --- |
+| a challenge iframe | `challenges.cloudflare.com`, `hcaptcha.com`, `recaptcha/api2`, `captcha-delivery.com`, PerimeterX, Arkose |
+| interstitial wording | "just a moment", "verify you are human", "press and hold", "pardon our interruption", "access denied" |
+| a blocked status | 401, 403, 429, 503 |
+
+The detector is deliberately narrow. These campaign pages talk about security and verification
+constantly, so only wording that belongs to an interstitial counts, and a 404 is a dead campaign
+rather than a gate — a false positive would pass over a living campaign, which is the exact harm the
+feature exists to prevent.
+
+Unexpected gates are appended to `gates.jsonl` beside the ledger, with the stage (`plan`, `donate`,
+`check`), the account, the URL, the kind and what gave it away, and surfaced by `gates`. Chuffed's
+payment page is **not** logged: a line per run for a challenge already designed around would bury
+the ones that matter. `check` reports gates under their own kind, `blocked`, and only from the pass
+whose answer it reports, so challenges provoked by the crawl's own load do not fill the file.
+
 ## Keeping the scraping honest
 
 Every part of this that touches a campaign site is a guess about someone else's markup, and it decays
@@ -217,7 +244,8 @@ and for each one confirms that what the tool depends on can still be read:
 
 | checked | why it matters |
 | --- | --- |
-| the campaign page opens and is not closed | a dead campaign should never reach the payment step |
+| the campaign page opens and is not gated | a challenge means nothing was learned; see above |
+| the campaign page is not closed | a dead campaign should never reach the payment step |
 | the raised total parses | it is the final ranking key |
 | the campaign's currency is established | without it the total cannot be compared to anything |
 | the total converts to `currency` | same |
@@ -261,6 +289,7 @@ the full results, including what *was* found, for looking at afterwards.
 | config | `~/.config/palestine-donator/config.json` | optional |
 | card | `~/.config/palestine-donator/card.enc` | AES-256-GCM under a scrypt-derived passphrase, mode 0600 |
 | ledger | `~/.local/share/palestine-donator/ledger.jsonl` | append-only, one line per attempt |
+| bot gate log | `~/.local/share/palestine-donator/gates.jsonl` | append-only, unexpected gates only |
 | browser profile | `~/.local/share/palestine-donator/browser-profile/` | so cookie banners and Cloudflare clearance survive between runs |
 | debug screenshots | `~/.local/share/palestine-donator/debug/` | `--debug`, written on failure only |
 | API + verification cache | `~/.cache/palestine-donator/` | 15 minute TTL; exchange rates 12 hours |
@@ -281,7 +310,7 @@ charged in this window, and who has already been paid.
 Node.js 20+, ESM, no runtime dependency except Puppeteer. Tests use the built-in `node:test`.
 
 ```
-bin/donate.js             CLI: plan | donate | card | config | check | history
+bin/donate.js             CLI: plan | donate | card | config | check | gates | history
 src/config.js             defaults <- file <- flags, validation, recurrence window
 src/editor.js             locating and running $VISUAL/$EDITOR for `config edit`
 src/paths.js              where config, cache, data and the browser profile live
@@ -301,6 +330,7 @@ src/url.js                URL normalisation and platform detection
 src/prompt.js             confirmation, hidden passphrase entry
 src/run.js                plan pipeline and the assisted payment loop
 src/check.js              the periodic scraping diagnostic
+src/gates.js              spotting bot gates, and the log of unexpected ones
 src/progress.js           the progress line for long runs
 test/                     node:test, with captured API and HTML fixtures
 ```
@@ -318,9 +348,9 @@ because it does not render past Turnstile in a headless browser.
 
 ## Tests
 
-193 tests, no network and no browser: selection and both ranking stages, currency parsing and
-conversion, the diagnostic's classification of findings, the browser session's lifecycle, budget
-arithmetic over the ledger
+210 tests, no network and no browser: selection and both ranking stages, currency parsing and
+conversion, bot-gate detection and its log, the diagnostic's classification of findings, the browser
+session's lifecycle, budget arithmetic over the ledger
 including tips, the misconfigured-budget hard stop, config loading and editor resolution, card
 encryption, cache behaviour, API query construction against captured fixtures, the Gaza Verified
 check against real captured pages, the drivers' pure helpers, and the payment loop's retry and abort

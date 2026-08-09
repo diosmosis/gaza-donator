@@ -12,6 +12,7 @@
  */
 import { clickFirst, findFirst, pageText, readText, readValue, typeInto } from '../browser.js';
 import { parseMoney as parseMoneyWithCurrency } from '../money.js';
+import { detectGateOnPage } from '../gates.js';
 import { fillStripeCard } from './stripe.js';
 
 export const SELECTORS = {
@@ -147,9 +148,16 @@ const driver = {
     try {
       const response = await page.goto(campaignUrl, { waitUntil: 'domcontentloaded' });
       const status = response?.status() ?? 0;
-      if (status >= 400) return { ok: false, note: `campaign page returned HTTP ${status}` };
 
       await page.waitForNetworkIdle({ idleTime: 800, timeout: 20_000 }).catch(() => {});
+
+      // Before anything is read: a challenge page has no donate button and no
+      // raised total either, and blaming that on the campaign or on our
+      // selectors would be wrong in both directions.
+      const gate = await detectGateOnPage(page, { status });
+      if (gate) return { ok: false, gate, note: `bot gate on the campaign page (${gate.kind})` };
+
+      if (status >= 400) return { ok: false, note: `campaign page returned HTTP ${status}` };
 
       const text = await pageText(page);
       const closed = CLOSED_MARKERS.find((marker) => text.includes(marker));
@@ -198,7 +206,17 @@ const driver = {
     });
     if (!form) {
       log('  the Chuffed payment form has not appeared — clear the Cloudflare check in the browser');
-      return { filled: [], manual: ['the whole form (it never rendered)'], url: page.url() };
+      // A gate here is the expected one, and the assisted flow exists for it;
+      // it is reported so the caller can tell it apart from a broken page, but
+      // not as something to investigate.
+      const gate = await detectGateOnPage(page);
+      return {
+        filled: [],
+        manual: ['the whole form (it never rendered)'],
+        url: page.url(),
+        gate,
+        gateExpected: true,
+      };
     }
     await form.dispose();
 

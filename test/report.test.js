@@ -5,6 +5,8 @@ import {
   formatAge,
   formatMoney,
   renderRecipients,
+  renderGateLog,
+  renderGates,
   renderRejections,
   renderSummary,
   truncate,
@@ -159,4 +161,54 @@ test('the summary never reports a negative remaining budget', () => {
     spentBefore: 10,
   });
   assert.match(summary, /remaining in this period: \$0\.00/);
+});
+
+test('gates seen in a run are shown with where they happened', () => {
+  const rendered = renderGates(
+    [
+      {
+        fqn: '@blocked@x',
+        kind: 'cloudflare',
+        url: 'https://www.chuffed.org/project/x',
+        marker: 'just a moment',
+      },
+    ],
+    { total: 4, file: '/tmp/gates.jsonl' },
+  );
+
+  assert.match(rendered, /Bot gates/);
+  assert.match(rendered, /@blocked@x/);
+  assert.match(rendered, /cloudflare/);
+  assert.match(rendered, /passed over/);
+});
+
+test('a clean run mentions the log only if there is something in it', () => {
+  assert.equal(renderGates([], { total: 0, file: '/tmp/gates.jsonl' }), '');
+  assert.match(renderGates([], { total: 3, file: '/tmp/gates.jsonl' }), /3 on record/);
+});
+
+test('the gate log reads as a list of places to look', () => {
+  const rendered = renderGateLog(
+    [
+      {
+        kind: 'press-and-hold',
+        platform: 'gofundme',
+        stage: 'check',
+        count: 2,
+        first: '2026-08-01T00:00:00Z',
+        last: '2026-08-08T09:30:00Z',
+        examples: ['https://www.gofundme.com/f/x'],
+      },
+    ],
+    { file: '/tmp/gates.jsonl' },
+  );
+
+  assert.match(rendered, /2026-08-08 09:30/);
+  assert.match(rendered, /press-and-hold/);
+  assert.match(rendered, /GoFundMe/);
+  assert.match(rendered, /gofundme\.com\/f\/x/);
+});
+
+test('an empty gate log says so, with where it would be', () => {
+  assert.match(renderGateLog([], { file: '/tmp/gates.jsonl' }), /no bot gates recorded/);
 });

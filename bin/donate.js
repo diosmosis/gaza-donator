@@ -22,6 +22,7 @@ import { GazaApi, indexStatsByAccount } from '../src/api.js';
 import { BrowserSession } from '../src/browser.js';
 import { buildCandidates } from '../src/select.js';
 import { checkCampaigns, summarise } from '../src/check.js';
+import { GateLog, summariseGates } from '../src/gates.js';
 import { createConverter } from '../src/fx.js';
 import { Progress } from '../src/progress.js';
 import { Cache } from '../src/cache.js';
@@ -35,6 +36,8 @@ import {
   green,
   red,
   renderCheckReport,
+  renderGateLog,
+  renderGates,
   renderHistory,
   renderRecipients,
   renderRejections,
@@ -72,6 +75,7 @@ the people who have received the least lately.
   ${bold('card')} set|status|clear   manage the encrypted card
   ${bold('config')} edit|show|path   edit the config file in $EDITOR, or inspect it
   ${bold('check')} [--deep]       visit every campaign and report what no longer parses
+  ${bold('gates')} [clear]        bot gates seen in past runs, worth a look
   ${bold('history')}              show past donations
 
 Options
@@ -144,6 +148,8 @@ async function main() {
     // `config` is handled above, before the configuration is validated.
     case 'check':
       return commandCheck({ config, paths, flags });
+    case 'gates':
+      return commandGates({ paths, action: rest[0] ?? 'show' });
     case 'history':
       return commandHistory({ config, paths });
     default:
@@ -200,6 +206,12 @@ async function planAndReport({ config, paths, flags }) {
   console.log('');
   console.log(bold('Not selected'));
   console.log(renderRejections(result.rejected));
+
+  const gates = renderGates(result.gates ?? [], {
+    total: result.gateLog?.all().length ?? 0,
+    file: paths.gatesFile,
+  });
+  if (gates) console.log(gates);
 
   return result;
 }
@@ -401,6 +413,7 @@ async function commandCheck({ config, paths, flags }) {
       concurrency,
       convert,
       deep: flags.deep,
+      gateLog: new GateLog(paths.gatesFile),
       onResult: (result) => progress.tick({ ok: result.ok, label: result.fqn }),
       onRecheck: (count) => {
         progress.finish();
@@ -494,6 +507,38 @@ async function editConfig(configFile) {
       return 1;
     }
   }
+}
+
+/** The persistent record of bot gates: what got in the way, and when. */
+async function commandGates({ paths, action }) {
+  const log = new GateLog(paths.gatesFile);
+
+  if (action === 'clear') {
+    console.log(log.clear() ? `removed ${paths.gatesFile}` : 'no gate log to remove');
+    return 0;
+  }
+  if (action !== 'show') {
+    fail(`unknown gates action "${action}" (use show or clear)`);
+    return 2;
+  }
+
+  const entries = log.all();
+  console.log(`${bold('Bot gates')} ${dim(paths.gatesFile)}`);
+  console.log(renderGateLog(summariseGates(entries), { file: paths.gatesFile }));
+
+  if (entries.length > 0) {
+    console.log('');
+    console.log(
+      dim(
+        'A gate means a page would not open for this tool, so whoever was behind it was\n' +
+          'passed over. Chuffed\'s payment page is expected to be gated and is not logged;\n' +
+          'anything here appeared somewhere it was not expected. Open one and see what it\n' +
+          'shows a browser — then either the selectors need updating, or the site has\n' +
+          'started refusing automated visits and that campaign needs donating to by hand.',
+      ),
+    );
+  }
+  return 0;
 }
 
 async function commandHistory({ config, paths }) {

@@ -39,6 +39,7 @@ export function resolvePaths(env = process.env) {
     configFile: path.join(configDir, 'config.json'),
     cardFile: path.join(configDir, 'card.enc'),
     ledgerFile: path.join(dataDir, 'ledger.jsonl'),
+    gatesFile: path.join(dataDir, 'gates.jsonl'),
     browserProfileDir: path.join(dataDir, 'browser-profile'),
     debugDir: path.join(dataDir, 'debug'),
   };

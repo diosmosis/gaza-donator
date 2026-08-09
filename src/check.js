@@ -62,6 +62,14 @@ export async function checkCampaign(
     return finish(result);
   }
 
+  // A challenge is neither the campaign's fault nor a rotted selector, and
+  // filing it as either would send whoever reads this report the wrong way.
+  if (inspection.gate) {
+    result.gate = inspection.gate;
+    problem(KIND.BLOCKED, `bot gate (${inspection.gate.kind}): ${inspection.gate.marker}`);
+    return finish(result);
+  }
+
   if (!inspection.ok) {
     problem(KIND.CAMPAIGN, inspection.note ?? 'the campaign page did not check out');
     return finish(result);
@@ -187,10 +195,23 @@ export async function checkCampaigns({
   deep = false,
   resolveDriver = driverFor,
   retryFailures = true,
+  gateLog = null,
   onResult = () => {},
   onRecheck = () => {},
   pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) {
+  const recordGate = (result) => {
+    if (!gateLog || !result?.gate) return;
+    gateLog.record({
+      stage: 'check',
+      fqn: result.fqn,
+      platform: result.platform,
+      url: result.campaignUrl,
+      kind: result.gate.kind,
+      marker: result.gate.marker,
+    });
+  };
+
   const once = async (candidate) => {
     try {
       return await checkCampaign(candidate, { browser, convert, deep, resolveDriver });
@@ -214,8 +235,13 @@ export async function checkCampaigns({
     return result;
   });
 
+  // Gates are logged from the second pass only, so a challenge that was really
+  // our own crawl annoying the site does not fill the log.
   const failures = results.map((result, index) => index).filter((index) => !results[index].ok);
-  if (!retryFailures || failures.length === 0) return results;
+  if (!retryFailures || failures.length === 0) {
+    for (const index of failures) recordGate(results[index]);
+    return results;
+  }
 
   onRecheck(failures.length);
   await pause(3000); // let the sites recover from the crawl before asking again
@@ -227,6 +253,7 @@ export async function checkCampaigns({
     second.retried = true;
     if (second.ok) second.clearedOnRetry = results[index].problems.map((problem) => problem.message);
     results[index] = second;
+    recordGate(second);
     onResult(second, index);
   });
 

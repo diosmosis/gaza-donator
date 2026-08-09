@@ -15,6 +15,7 @@
  */
 import { clickFirst, clickMatching, findFirst, pageText, readValue, settle, typeInto } from '../browser.js';
 import { parseMoney } from '../money.js';
+import { detectGateOnPage } from '../gates.js';
 import { waitForThanks } from './chuffed.js';
 
 export const SELECTORS = {
@@ -126,9 +127,15 @@ const driver = {
   async inspect(page, campaignUrl) {
     const response = await page.goto(campaignUrl, { waitUntil: 'domcontentloaded' });
     const status = response?.status() ?? 0;
-    if (status >= 400) return { ok: false, note: `campaign page returned HTTP ${status}` };
 
     await page.waitForNetworkIdle({ idleTime: 800, timeout: 20_000 }).catch(() => {});
+
+    // A challenge page parses as "no raised total", which would otherwise be
+    // filed against our selectors rather than against being blocked.
+    const gate = await detectGateOnPage(page, { status });
+    if (gate) return { ok: false, gate, note: `bot gate on the campaign page (${gate.kind})` };
+
+    if (status >= 400) return { ok: false, note: `campaign page returned HTTP ${status}` };
 
     const text = await pageText(page);
     const closed = CLOSED_MARKERS.find((marker) => text.includes(marker));
@@ -143,9 +150,22 @@ const driver = {
     };
   },
 
-  async prepare(page, { campaignUrl, amount, tip = 0, card, donor }) {
+  async prepare(page, { campaignUrl, amount, tip = 0, card, donor, log = () => {} }) {
     await page.goto(donateUrl(campaignUrl), { waitUntil: 'domcontentloaded' });
     await page.waitForNetworkIdle({ idleTime: 1000, timeout: 30_000 }).catch(() => {});
+
+    // GoFundMe's checkout normally renders for us. If it has put up a challenge
+    // instead, say so plainly rather than reporting every field as unfillable.
+    const gate = await detectGateOnPage(page);
+    if (gate) {
+      log(`  GoFundMe is showing a ${gate.kind} challenge — clear it in the browser window`);
+      return {
+        filled: [],
+        manual: ['the whole form (a bot challenge is in the way)'],
+        url: page.url(),
+        gate,
+      };
+    }
 
     const filled = [];
     const manual = [];

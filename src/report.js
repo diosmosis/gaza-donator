@@ -255,7 +255,7 @@ export function renderCheckReport(results, { groups, elapsedMs, deep = false }) 
       renderTable(
         groups.map((group) => ({
           count: String(group.count),
-          kind: group.kind === 'parse' ? yellow(group.kind) : dim(group.kind),
+          kind: group.kind === 'campaign' ? dim(group.kind) : yellow(group.kind),
           message: truncate(group.message, 80),
         })),
         [
@@ -269,7 +269,21 @@ export function renderCheckReport(results, { groups, elapsedMs, deep = false }) 
     out.push(
       dim(
         '  parse = the page loaded but this tool could not read it (likely a selector to fix)\n' +
-          '  campaign = the campaign itself is gone, closed or unreachable',
+          '  campaign = the campaign itself is gone, closed or unreachable\n' +
+          '  blocked = a bot gate stood in the way, so nothing was learned either way',
+      ),
+    );
+  }
+
+  const blocked = results.filter((result) =>
+    result.problems.some((problem) => problem.kind === 'blocked'),
+  );
+  if (blocked.length > 0) {
+    out.push('');
+    out.push(
+      yellow(
+        `  ${blocked.length} campaign(s) were behind a bot gate — not read, and not judged. ` +
+          'They are in the gate log; see `gates`.',
       ),
     );
   }
@@ -303,6 +317,67 @@ export function renderCheckReport(results, { groups, elapsedMs, deep = false }) 
   }
 
   return out.join('\n');
+}
+
+/**
+ * Bot gates: the ones this run walked into, and how many are on record.
+ *
+ * Printed after every command that opens pages, because a gate is the one
+ * failure that looks exactly like a different failure — a closed campaign, or a
+ * selector that stopped matching — and quietly changes who gets money.
+ */
+export function renderGates(seen, { total = seen.length, file = null } = {}) {
+  if (seen.length === 0) {
+    return total > 0 && file
+      ? dim(`  no bot gates this run (${total} on record — see \`gates\`)`)
+      : '';
+  }
+
+  const rows = seen.map((gate) => ({
+    who: gate.fqn ?? dim('—'),
+    kind: yellow(gate.kind),
+    where: truncate(gate.url ?? '', 56),
+    marker: dim(truncate(gate.marker ?? '', 28)),
+  }));
+
+  return [
+    '',
+    bold('Bot gates'),
+    renderTable(rows, [
+      { key: 'who', header: 'account' },
+      { key: 'kind', header: 'gate' },
+      { key: 'where', header: 'page' },
+      { key: 'marker', header: 'seen as' },
+    ]),
+    dim(
+      `  these pages were not read, so those candidates were passed over${
+        file ? `. Logged to ${file} — see \`gates\`` : ''
+      }`,
+    ),
+  ].join('\n');
+}
+
+/** `gates` output: the persistent log, grouped. */
+export function renderGateLog(groups, { file }) {
+  if (groups.length === 0) return dim(`  no bot gates recorded (${file})`);
+
+  const rows = groups.map((group) => ({
+    last: new Date(group.last).toISOString().replace('T', ' ').slice(0, 16),
+    count: String(group.count),
+    kind: yellow(group.kind),
+    platform: group.platform ? platformLabel(group.platform) : dim('—'),
+    stage: group.stage,
+    example: dim(truncate(group.examples[0] ?? '', 52)),
+  }));
+
+  return renderTable(rows, [
+    { key: 'last', header: 'last seen (UTC)' },
+    { key: 'count', header: 'times', align: 'right' },
+    { key: 'kind', header: 'gate' },
+    { key: 'platform', header: 'platform' },
+    { key: 'stage', header: 'during' },
+    { key: 'example', header: 'example page' },
+  ]);
 }
 
 /** `history` output. */

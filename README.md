@@ -137,6 +137,7 @@ node bin/donate.js donate --execute --limit 1   # one recipient, for a first run
 node bin/donate.js history                   # what has been donated this period
 node bin/donate.js config edit               # change the settings
 node bin/donate.js check                     # is the scraping still working?
+node bin/donate.js gates                     # what has been blocking us lately
 ```
 
 Useful flags: `--total`, `--amount`, `--tip`, `--period weekly|monthly|10d`, `--limit`, `--yes`,
@@ -144,6 +145,31 @@ Useful flags: `--total`, `--amount`, `--tip`, `--period weekly|monthly|10d`, `--
 
 For a scheduled run, set `PALESTINE_DONATOR_PASSPHRASE` and pass `--yes`. The browser step still
 needs a display and a person — see below.
+
+## Bot gates
+
+One gate is part of the design: Chuffed's payment page is behind a Cloudflare challenge, which is
+the whole reason donating is assisted. Anywhere else — a campaign page during `plan`, the roster
+during `check` — a challenge is news, because it looks exactly like a page whose markup changed. A
+gated page has no donate button and no raised total either, so without naming it, being blocked gets
+misfiled as "the selector rotted" or, worse, as "this campaign is closed", and that person is
+quietly passed over.
+
+So every page load is checked for one — a challenge iframe (Cloudflare, hCaptcha, reCAPTCHA,
+DataDome, PerimeterX), interstitial wording, or a 401/403/429/503 — and unexpected ones are appended
+to `~/.local/share/palestine-donator/gates.jsonl` and called out in the run's summary.
+
+```sh
+node bin/donate.js gates          # what has been getting in the way, grouped
+node bin/donate.js gates clear    # start the record over
+```
+
+`check` reports these under their own kind, `blocked`, distinct from `parse` and `campaign` — being
+blocked means nothing was learned either way. Gates are logged from the pass whose answer is
+reported, so challenges provoked by the crawl's own load do not fill the file.
+
+The detector is deliberately narrow: these pages talk about "security" and "verification" constantly,
+so only interstitial wording counts, and a 404 is a dead campaign rather than a gate.
 
 ## Donating is assisted, not unattended
 
@@ -171,6 +197,7 @@ summary, so a broken card or a blocked session cannot quietly burn through the b
 | config | `~/.config/palestine-donator/config.json` |
 | card | `~/.config/palestine-donator/card.enc` |
 | ledger | `~/.local/share/palestine-donator/ledger.jsonl` |
+| bot gate log | `~/.local/share/palestine-donator/gates.jsonl` |
 | browser profile | `~/.local/share/palestine-donator/browser-profile/` |
 | API + verification cache (15 min TTL, exchange rates 12 h) | `~/.cache/palestine-donator/` |
 
@@ -182,9 +209,9 @@ Set `PALESTINE_DONATOR_HOME` to put all of it somewhere else. None of it lives i
 npm test
 ```
 
-193 tests, no network and no browser: selection and both ranking stages, currency parsing and
-conversion, the diagnostic's classification of findings, the browser session's lifecycle, budget
-arithmetic over the ledger
+210 tests, no network and no browser: selection and both ranking stages, currency parsing and
+conversion, bot-gate detection and its log, the diagnostic's classification of findings, the browser
+session's lifecycle, budget arithmetic over the ledger
 (including tips), the misconfigured-budget hard stop, config loading and editor resolution, card
 encryption, cache behaviour, API query construction against captured fixtures, the Gaza Verified
 check against real captured pages, the drivers' pure helpers, and the payment loop's retry and abort

@@ -120,6 +120,7 @@ export function createVerifier({
   log = () => {},
   fetchImpl,
   convert = null,
+  onGate = () => {},
 }) {
   const checks = config.verify ?? {};
 
@@ -153,6 +154,21 @@ export function createVerifier({
         inspection = await browser.withPage((page) => driver.inspect(page, candidate.campaignUrl));
       } catch (err) {
         return { ok: false, note: `could not open the campaign page: ${err.message}`, warnings };
+      }
+
+      // A gate is worth naming wherever it appears: the candidate is dropped
+      // either way, but "we were blocked" and "this campaign is gone" call for
+      // completely different follow-up.
+      if (inspection.gate) {
+        onGate({
+          stage: 'plan',
+          fqn: candidate.fqn,
+          platform: candidate.platform,
+          url: candidate.campaignUrl,
+          kind: inspection.gate.kind,
+          marker: inspection.gate.marker,
+        });
+        return { ok: false, note: inspection.note, gate: inspection.gate, warnings };
       }
 
       if (checks.campaign && !inspection.ok) {

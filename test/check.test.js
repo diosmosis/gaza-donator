@@ -323,3 +323,66 @@ test('the re-check happens after the crawl, not in the middle of it', async () =
 
   assert.deepEqual(order, ['check', 'check', 'check', 'recheck 1', 'pause', 'check']);
 });
+
+test('a bot gate is blocked, not blamed on the campaign or on our selectors', async () => {
+  const result = await checkCampaign(candidate(), {
+    browser: fakeBrowser(),
+    resolveDriver: driverReturning({
+      ok: false,
+      gate: { kind: 'cloudflare', marker: 'just a moment' },
+      note: 'bot gate on the campaign page (cloudflare)',
+    }),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.problems[0].kind, KIND.BLOCKED);
+  assert.match(result.problems[0].message, /cloudflare.*just a moment/);
+  assert.equal(result.gate.kind, 'cloudflare');
+});
+
+test('gates are written to the log once, from the pass that is reported', async () => {
+  // Logging the first pass too would fill the log with challenges our own
+  // crawl provoked.
+  const recorded = [];
+  const gateLog = { record: (entry) => recorded.push(entry) };
+  const gate = { kind: 'press-and-hold', marker: 'press and hold' };
+
+  await checkCampaigns({
+    candidates: [candidate({ fqn: '@blocked@x', platform: 'gofundme' })],
+    browser: fakeBrowser(),
+    gateLog,
+    pause: noPause,
+    resolveDriver: () => ({
+      id: 'fake',
+      inspect: async () => ({ ok: false, gate, note: 'bot gate on the campaign page' }),
+    }),
+  });
+
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].stage, 'check');
+  assert.equal(recorded[0].fqn, '@blocked@x');
+  assert.equal(recorded[0].kind, 'press-and-hold');
+});
+
+test('a gate that clears on the second pass is not logged', async () => {
+  const recorded = [];
+  let attempt = 0;
+
+  await checkCampaigns({
+    candidates: [candidate()],
+    browser: fakeBrowser(),
+    gateLog: { record: (entry) => recorded.push(entry) },
+    pause: noPause,
+    resolveDriver: () => ({
+      id: 'fake',
+      inspect: async () => {
+        attempt += 1;
+        return attempt === 1
+          ? { ok: false, gate: { kind: 'cloudflare', marker: 'just a moment' }, note: 'gate' }
+          : GOOD;
+      },
+    }),
+  });
+
+  assert.deepEqual(recorded, [], 'the site let us in on the second ask; nothing to investigate');
+});

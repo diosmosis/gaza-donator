@@ -11,6 +11,7 @@ import { Ledger, STATUS, budgetFor, round2 } from './ledger.js';
 import { buildCandidates, selectRecipients } from './select.js';
 import { createVerifier } from './verify.js';
 import { createConverter } from './fx.js';
+import { GateLog } from './gates.js';
 import { driverFor } from './drivers/index.js';
 import { recurrenceDays, windowStart } from './config.js';
 import { formatMoney, dim, yellow } from './report.js';
@@ -90,7 +91,18 @@ export async function planRun({
       log: (message) => log(dim(message)),
     });
 
-    const verifier = willVerify ? createVerifier({ config, browser, cache, log, convert }) : null;
+    // Gates seen during planning go straight to the persistent log, and come
+    // back in the result so this run's summary can mention them.
+    const gateLog = new GateLog(paths.gatesFile);
+    const gates = [];
+    const onGate = (gate) => {
+      gates.push(gateLog.record(gate));
+      log(yellow(`  ${gate.fqn}: bot gate (${gate.kind}) on ${gate.url}`));
+    };
+
+    const verifier = willVerify
+      ? createVerifier({ config, browser, cache, log, convert, onGate })
+      : null;
 
     const selection = await selectRecipients({
       candidates,
@@ -104,7 +116,7 @@ export async function planRun({
       log: (message) => log(dim(message)),
     });
 
-    return { ...selection, budget, slots, since, periodDays, ledger, candidates };
+    return { ...selection, budget, slots, since, periodDays, ledger, candidates, gates, gateLog };
   } finally {
     await browser?.close();
   }
@@ -132,6 +144,7 @@ export async function executeDonations({
   log = () => {},
   browser = null,
   resolveDriver = driverFor,
+  gateLog = paths?.gatesFile ? new GateLog(paths.gatesFile) : null,
 }) {
   const results = [];
   let consecutiveFailures = 0;
@@ -174,6 +187,7 @@ export async function executeDonations({
         browser: session,
         paths,
         log,
+        gateLog,
       });
 
       results.push(record(ledger, recipient, config, outcome.status, outcome.note));
@@ -199,7 +213,7 @@ export async function executeDonations({
 }
 
 /** One recipient, with retries. */
-async function donateOnce({ driver, recipient, config, card, browser, paths, log }) {
+async function donateOnce({ driver, recipient, config, card, browser, paths, log, gateLog }) {
   const attempts = config.retries + 1;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -219,6 +233,20 @@ async function donateOnce({ driver, recipient, config, card, browser, paths, log
       log(dim(`  filled: ${prepared.filled.join(', ') || 'nothing'}`));
       if (prepared.manual.length > 0) {
         log(yellow(`  fill in yourself: ${prepared.manual.join(', ')}`));
+      }
+
+      // Chuffed's payment page is gated by design and the assisted flow is
+      // built around it; anywhere else, a gate is worth writing down.
+      if (prepared.gate && !prepared.gateExpected) {
+        gateLog?.record({
+          stage: 'donate',
+          fqn: recipient.fqn,
+          platform: recipient.platform,
+          url: prepared.url ?? recipient.campaignUrl,
+          kind: prepared.gate.kind,
+          marker: prepared.gate.marker,
+          note: 'on the payment page',
+        });
       }
       log(`  >> complete any captcha / 3-D Secure and click donate in the browser window`);
       log(dim(`     (waiting up to ${Math.round(config.donationTimeoutMs / 60000)} minutes)`));
