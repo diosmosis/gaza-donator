@@ -231,3 +231,82 @@ test('the ledger never records the card', async () => {
   await promise;
   assert.ok(!JSON.stringify(ledger.all()).includes('4111'));
 });
+
+test('the payment step is given the run\'s full human timeout, not a shorter one of its own', async () => {
+  // The gated page can sit for minutes while a person clears a challenge; the
+  // driver has to be told how long it is allowed to wait for them.
+  const { promise, prepared } = run([recipient(1)], ['ok'], { donationTimeoutMs: 420_000 });
+  await promise;
+
+  assert.equal(prepared[0].timeoutMs, 420_000);
+});
+
+test('a tab the user closed is skipped, not retried', async () => {
+  // Closing the window means the donation is done, or that this one is being
+  // passed over deliberately. Reopening a payment page for it would be wrong
+  // in both readings.
+  let attempts = 0;
+  const browser = fakeBrowser();
+  const ledger = tempLedger();
+
+  const { results, aborted } = await executeDonations({
+    recipients: [recipient(1), recipient(2)],
+    config: CONFIG,
+    paths: { browserProfileDir: '/tmp/unused', debugDir: '/tmp/unused' },
+    card: CARD,
+    ledger,
+    browser,
+    resolveDriver: () => ({
+      id: 'fake',
+      async prepare() {
+        attempts += 1;
+        return { filled: ['amount'], manual: [], url: 'https://example.com' };
+      },
+      async waitForConfirmation() {
+        return { ok: false, closed: true, note: 'the tab was closed' };
+      },
+    }),
+  });
+
+  assert.equal(attempts, 2, 'one attempt each, no retries');
+  assert.deepEqual(
+    results.map((r) => r.status),
+    [STATUS.SKIPPED, STATUS.SKIPPED],
+  );
+  assert.equal(aborted, false, 'and it does not count towards the abort rule');
+  assert.equal(ledger.spentSince(new Date(Date.now() - 60_000)), 0);
+});
+
+test('a tab closed mid-fill is skipped rather than retried', async () => {
+  let attempts = 0;
+  const { promise, ledger } = (() => {
+    const browser = fakeBrowser();
+    const ledger = tempLedger();
+    return {
+      ledger,
+      promise: executeDonations({
+        recipients: [recipient(1)],
+        config: CONFIG,
+        paths: { browserProfileDir: '/tmp/unused', debugDir: '/tmp/unused' },
+        card: CARD,
+        ledger,
+        browser,
+        resolveDriver: () => ({
+          id: 'fake',
+          async prepare() {
+            attempts += 1;
+            throw new Error('Protocol error (Runtime.callFunctionOn): Target closed.');
+          },
+          async waitForConfirmation() {
+            return { ok: true, note: 'never reached' };
+          },
+        }),
+      }),
+    };
+  })();
+
+  const { results } = await promise;
+  assert.equal(attempts, 1, 'the driver is not called again');
+  assert.equal(results[0].status, STATUS.SKIPPED);
+  assert.equal(ledger.spentSince(new Date(Date.now() - 60_000)), 0);
+});

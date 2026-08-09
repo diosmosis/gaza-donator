@@ -218,6 +218,8 @@ export async function selectRecipients({
   verify = null,
   poolFactor = 3,
   log = () => {},
+  onVerifyStart = () => {},
+  onVerifyResult = () => {},
 }) {
   const { eligible, rejected } = filterCandidates(candidates, {
     platforms,
@@ -241,7 +243,12 @@ export async function selectRecipients({
   for (const candidate of ranked) {
     if (pool.length >= target) break;
 
+    // Each verification opens a campaign page, so this loop is where the
+    // minutes go; the callbacks let a caller show what it is waiting for.
+    onVerifyStart(candidate, { filled: pool.length, target });
     const result = await verify(candidate);
+    onVerifyResult(candidate, { ok: Boolean(result?.ok), filled: pool.length, target });
+
     if (result?.ok) {
       pool.push({ ...candidate, verification: result });
     } else {

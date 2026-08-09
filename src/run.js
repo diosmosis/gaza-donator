@@ -6,16 +6,18 @@
  */
 import { Cache } from './cache.js';
 import { GazaApi, indexStatsByAccount } from './api.js';
-import { BrowserSession } from './browser.js';
+import { BrowserSession, isClosedError } from './browser.js';
 import { Ledger, STATUS, budgetFor, round2 } from './ledger.js';
 import { buildCandidates, selectRecipients } from './select.js';
 import { createVerifier } from './verify.js';
 import { createConverter } from './fx.js';
 import { GateLog } from './gates.js';
 import { driverFor } from './drivers/index.js';
-import { recurrenceDays, windowStart } from './config.js';
+import { cacheTtlMs, recurrenceDays, windowStart } from './config.js';
 import { formatMoney, dim, yellow } from './report.js';
 import { ensureDir } from './paths.js';
+import { isInteractive, promptEnter } from './prompt.js';
+import { announcer } from './notice.js';
 
 /**
  * Everything up to (but not including) spending money.
@@ -35,9 +37,11 @@ export async function planRun({
   verify = true,
   limit = null,
   log = () => {},
+  onVerifyStart = () => {},
+  onVerifyResult = () => {},
   now = new Date(),
 }) {
-  const cache = new Cache({ dir: paths.cacheDir, read: useCache });
+  const cache = new Cache({ dir: paths.cacheDir, read: useCache, ttlMs: cacheTtlMs(config) });
   const api = new GazaApi({ cache });
   const since = windowStart(config, now);
   const periodDays = recurrenceDays(config.recurrence);
@@ -100,8 +104,17 @@ export async function planRun({
       log(yellow(`  ${gate.fqn}: bot gate (${gate.kind}) on ${gate.url}`));
     };
 
+    let cachedVerifications = 0;
     const verifier = willVerify
-      ? createVerifier({ config, browser, cache, log, convert, onGate })
+      ? createVerifier({
+          config,
+          browser,
+          cache,
+          log,
+          convert,
+          onGate,
+          onCached: () => (cachedVerifications += 1),
+        })
       : null;
 
     const selection = await selectRecipients({
@@ -114,7 +127,13 @@ export async function planRun({
       verify: verifier,
       poolFactor: config.rankPoolFactor,
       log: (message) => log(dim(message)),
+      onVerifyStart,
+      onVerifyResult,
     });
+
+    if (cachedVerifications > 0) {
+      log(dim(`${cachedVerifications} verification(s) served from cache`));
+    }
 
     return { ...selection, budget, slots, since, periodDays, ledger, candidates, gates, gateLog };
   } finally {
@@ -145,6 +164,12 @@ export async function executeDonations({
   browser = null,
   resolveDriver = driverFor,
   gateLog = paths?.gatesFile ? new GateLog(paths.gatesFile) : null,
+  // Offered only when a challenge is actually in the way, and only to someone
+  // who is there to answer it. Whichever happens first — the form appearing or
+  // Enter — ends the wait.
+  confirmGate = isInteractive()
+    ? () => promptEnter('  >> press Enter once you are past the challenge: ')
+    : null,
 }) {
   const results = [];
   let consecutiveFailures = 0;
@@ -188,6 +213,7 @@ export async function executeDonations({
         paths,
         log,
         gateLog,
+        confirmGate,
       });
 
       results.push(record(ledger, recipient, config, outcome.status, outcome.note));
@@ -213,7 +239,7 @@ export async function executeDonations({
 }
 
 /** One recipient, with retries. */
-async function donateOnce({ driver, recipient, config, card, browser, paths, log, gateLog }) {
+async function donateOnce({ driver, recipient, config, card, browser, paths, log, gateLog, confirmGate }) {
   const attempts = config.retries + 1;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -221,13 +247,25 @@ async function donateOnce({ driver, recipient, config, card, browser, paths, log
 
     const page = await browser.newPage();
     try {
+      // Said before the page opens, not after: on a gated platform this step
+      // can sit waiting for minutes, and a silent wait is what made an earlier
+      // version look hung.
+      log(dim('  opening the payment page — clear any challenge you see and the form fills itself'));
+
+      // Everything from here is said on the page as well as in the terminal:
+      // the person is looking at the browser, not at the console behind it.
+      const say = announcer(log, page);
+
       const prepared = await driver.prepare(page, {
         campaignUrl: recipient.campaignUrl,
         amount: config.donationAmount,
         tip: config.tipAmount ?? 0,
+        currency: config.currency,
         card,
         donor: config.donor,
-        log,
+        log: (message) => say(message),
+        timeoutMs: config.donationTimeoutMs,
+        confirmGate,
       });
 
       log(dim(`  filled: ${prepared.filled.join(', ') || 'nothing'}`));
@@ -248,22 +286,44 @@ async function donateOnce({ driver, recipient, config, card, browser, paths, log
           note: 'on the payment page',
         });
       }
-      log(`  >> complete any captcha / 3-D Secure and click donate in the browser window`);
-      log(dim(`     (waiting up to ${Math.round(config.donationTimeoutMs / 60000)} minutes)`));
+      await say(
+        prepared.manual.length > 0
+          ? `  >> fill in what is missing, then click donate in the browser window`
+          : `  >> click donate in the browser window (and clear 3-D Secure if your bank asks)`,
+      );
+      log(
+        dim(
+          `     waiting up to ${Math.round(config.donationTimeoutMs / 60000)} minutes for the ` +
+            'confirmation page',
+        ),
+      );
 
       const confirmation = await driver.waitForConfirmation(page, {
         timeoutMs: config.donationTimeoutMs,
+        log,
       });
 
       if (confirmation.ok) {
-        log(`  ✓ ${confirmation.note}`);
+        await say(`  ✓ ${confirmation.note}`, { kind: 'done' });
         return { status: STATUS.SUCCESS, note: confirmation.note };
+      }
+
+      // A closed tab is an answer, not a fault: this one is either already done
+      // or deliberately abandoned. Either way, retrying it would reopen a
+      // payment page for a donation the person has finished with.
+      if (confirmation.closed) {
+        log(dim('  the tab was closed — taking that as done or deliberately skipped'));
+        return { status: STATUS.SKIPPED, note: 'the tab was closed, so this one was left alone' };
       }
 
       log(yellow(`  ✗ ${confirmation.note}`));
       await snapshot(page, paths, recipient, config, attempt);
       if (attempt === attempts) return { status: STATUS.FAILED, note: confirmation.note };
     } catch (err) {
+      if (isClosedError(err) || page.isClosed()) {
+        log(dim('  the tab was closed — taking that as done or deliberately skipped'));
+        return { status: STATUS.SKIPPED, note: 'the tab was closed, so this one was left alone' };
+      }
       log(yellow(`  ✗ ${err.message}`));
       await snapshot(page, paths, recipient, config, attempt);
       if (attempt === attempts) return { status: STATUS.FAILED, note: err.message };

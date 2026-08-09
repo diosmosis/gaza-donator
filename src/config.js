@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { PLATFORMS } from './url.js';
 import { resolvePaths } from './paths.js';
 import { round2 } from './ledger.js';
+import { DEFAULT_TTL_MS } from './cache.js';
 import { formatMoney } from './report.js';
 
 export const DEFAULT_CONFIG = {
@@ -50,6 +51,15 @@ export const DEFAULT_CONFIG = {
   },
   /** Divergence between scraped and API totals that earns a warning. */
   raisedTotalWarnRatio: 0.5,
+  /**
+   * How long API responses and verification results stay usable.
+   *
+   * This is also the width of the bucket the recurrence window is rounded to:
+   * two runs inside the same bucket ask the API the same question and so share
+   * an entry, and a lifetime longer than the bucket would be spent on entries
+   * nothing asks for again.
+   */
+  cacheTtlMinutes: 60,
   /** Retries per recipient before giving up on them. */
   retries: 2,
   /** Consecutive recipient failures that abort the whole run. */
@@ -109,15 +119,21 @@ export function recurrenceDays(recurrence) {
 /**
  * Start of the current recurrence window.
  *
- * Quantised to 15 minute boundaries so that two runs a few seconds apart ask
- * the API the same question and hit the 15 minute cache, instead of missing it
- * on a start_time that differs by milliseconds.
+ * Quantised to the cache lifetime so that two runs inside the same window ask
+ * the API the same question and hit the cache, instead of missing it on a
+ * start_time that differs by milliseconds.
  */
 export function windowStart(config, now = new Date()) {
   const days = recurrenceDays(config.recurrence);
-  const bucket = 15 * 60 * 1000;
+  const bucket = cacheTtlMs(config);
   const start = now.getTime() - days * 24 * 60 * 60 * 1000;
   return new Date(Math.floor(start / bucket) * bucket);
+}
+
+/** The configured cache lifetime, in milliseconds. */
+export function cacheTtlMs(config) {
+  const minutes = Number(config?.cacheTtlMinutes);
+  return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : DEFAULT_TTL_MS;
 }
 
 /**
@@ -189,6 +205,9 @@ export function validateConfig(config) {
 
   if (!Number.isInteger(config.maxRecipients) || config.maxRecipients < 1) {
     problems.push('maxRecipients must be a positive integer');
+  }
+  if (!(Number(config.cacheTtlMinutes) > 0)) {
+    problems.push('cacheTtlMinutes must be greater than 0');
   }
   if (!Number.isInteger(config.rankPoolFactor) || config.rankPoolFactor < 1) {
     problems.push('rankPoolFactor must be an integer of 1 or more');

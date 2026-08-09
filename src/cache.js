@@ -1,6 +1,7 @@
 /**
- * Small disk cache with a 15 minute TTL, used for gaza.onl API responses and for
- * the scraped verification results.
+ * Small disk cache, used for gaza.onl API responses and for the scraped
+ * verification results. The lifetime is configurable (`cacheTtlMinutes`); this
+ * is the default for callers that do not care.
  *
  * Entries are plain JSON files keyed by a hash of the logical request, so a
  * stale or corrupt entry can simply be deleted.
@@ -10,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ensureDir } from './paths.js';
 
-export const DEFAULT_TTL_MS = 15 * 60 * 1000;
+export const DEFAULT_TTL_MS = 60 * 60 * 1000;
 
 /**
  * Build a stable cache key. Query parameters are sorted so that callers that

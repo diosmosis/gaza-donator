@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   DEFAULT_CONFIG,
+  cacheTtlMs,
   chargePerRecipient,
   configProblem,
   describeConfig,
@@ -37,17 +38,33 @@ test('windowStart goes back exactly one recurrence period', () => {
   const now = new Date('2026-08-08T12:00:00Z');
   const start = windowStart({ recurrence: 'weekly' }, now);
   assert.equal(now.getTime() - start.getTime() >= 7 * 86400_000, true);
-  assert.equal(now.getTime() - start.getTime() < 7 * 86400_000 + 15 * 60_000, true);
+  assert.equal(now.getTime() - start.getTime() < 7 * 86400_000 + 60 * 60_000, true);
 });
 
-test('windowStart is quantised so repeated runs share a cache entry', () => {
+test('windowStart is quantised to the cache lifetime, so a run inside it hits the cache', () => {
+  // A window rounded more finely than the cache lives would ask a slightly
+  // different question every time and never reuse an entry.
   const config = { recurrence: 'weekly' };
   const a = windowStart(config, new Date('2026-08-08T12:00:03Z'));
-  const b = windowStart(config, new Date('2026-08-08T12:07:59Z'));
+  const b = windowStart(config, new Date('2026-08-08T12:47:59Z'));
   assert.equal(a.getTime(), b.getTime());
 
-  const later = windowStart(config, new Date('2026-08-08T12:16:00Z'));
+  const later = windowStart(config, new Date('2026-08-08T13:05:00Z'));
   assert.notEqual(a.getTime(), later.getTime());
+});
+
+test('the cache lifetime is configurable, and sets the window bucket with it', () => {
+  const fast = { recurrence: 'weekly', cacheTtlMinutes: 5 };
+  assert.equal(cacheTtlMs(fast), 5 * 60_000);
+
+  // With a five minute lifetime, two runs eight minutes apart are separate
+  // questions again.
+  const a = windowStart(fast, new Date('2026-08-08T12:00:03Z'));
+  const b = windowStart(fast, new Date('2026-08-08T12:08:00Z'));
+  assert.notEqual(a.getTime(), b.getTime());
+
+  assert.equal(cacheTtlMs({}), 60 * 60_000, 'an hour by default');
+  assert.equal(cacheTtlMs({ cacheTtlMinutes: 0 }), 60 * 60_000, 'nonsense falls back');
 });
 
 test('validateConfig accepts the defaults', () => {
@@ -67,6 +84,9 @@ test('validateConfig rejects configurations that would misspend money', () => {
     [{ platforms: [] }, /platforms/],
     [{ platforms: ['patreon'] }, /unsupported platform/],
     [{ maxRecipients: 0 }, /maxRecipients/],
+    [{ cacheTtlMinutes: 0 }, /cacheTtlMinutes/],
+    [{ cacheTtlMinutes: -5 }, /cacheTtlMinutes/],
+    [{ cacheTtlMinutes: 'ages' }, /cacheTtlMinutes/],
     [{ retries: -1 }, /retries/],
     [{ maxConsecutiveFailures: 0 }, /maxConsecutiveFailures/],
     [{ excludeAccounts: 'nobody' }, /excludeAccounts/],

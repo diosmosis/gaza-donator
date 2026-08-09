@@ -21,6 +21,7 @@ them, and CLI flags override both. Everything is validated before anything runs.
 | `platforms` | `["chuffed", "gofundme"]` | campaign platforms a recipient may be on |
 | `maxRecipients` | 25 | hard cap on recipients per period |
 | `rankPoolFactor` | 3 | candidates verified per slot before the final ranking |
+| `cacheTtlMinutes` | 60 | how long API responses and verification results stay usable |
 | `includeStates` | `["ACTIVE"]` | home-instance states to consider; `LIMITED` is opt-in |
 | `excludeAccounts` | `[]` | account FQNs or campaign URLs never to donate to |
 | `verify` | all three `true` | `{campaign, gazaVerified, raisedTotal}` |
@@ -134,7 +135,8 @@ compares them. Establishing the currency differs by platform:
   statement of it that reaches the browser is the GraphQL response behind the page, so `inspect`
   listens for that traffic and reads `"currency"` out of it.
 
-Rates come from `frankfurter.dev` (ECB), falling back to `open.er-api.com`, cached for 12 hours and
+Rates come from `frankfurter.dev` (ECB), falling back to `open.er-api.com`, cached for 12 hours
+regardless of `cacheTtlMinutes` — a day-old exchange rate still orders a list correctly — and
 fetched once per run — lazily, so a fully cached run fetches nothing. A total whose currency cannot
 be established, or that cannot be converted, is **not ranked on**: it is reported as a warning and
 the candidate falls back to its API total, because ranking on an unknown unit is worse than not
@@ -146,8 +148,60 @@ what the card is charged is the platform's own arithmetic.
 Chuffed's raised figure also animates upwards from zero, so a single read returns whatever it was
 passing through — $2,297 on a campaign that has raised $3,640. It is polled until it stops moving.
 
+### Reading selectors out of the site's own bundle
+
+Chuffed's payment page cannot be opened without clearing a challenge, which for a long time meant its
+selectors were written from conventions and quietly wrong. They are now read from `payment.js` — the
+bundle the page itself loads — and checked against a capture of the rendered page in
+`test/fixtures/chuffed-payment.html`. That fixture is the only thing that can tell "this selector
+matches nothing" apart from "this campaign has no such control", since both look like silence: `#impact-selector-option-other` for the amount, `name="firstName"` /
+`name="lastName"` / `name="email"` for the donor, `name="isOptIn"` and `name="isOptInChuffed"` for
+the two mailing lists, `name="isShowName"` for whether the donor is named publicly,
+`#currency-selector-currency-button` plus `[data-test="currency-conversion-save"]` for the currency,
+and `#js-donate-action-stripe` to submit.
+
+Two things that fixes:
+
+- **Mailing lists are opt-in, and this tool is not the one doing the opting.** Both toggles are
+  turned off before the donation is submitted.
+- **Anonymity actually applies.** Chuffed asks whether to *show* the donor's name rather than whether
+  to hide it, so a driver looking for a checkbox called "anonymous" found nothing and said nothing —
+  `donor.anonymous` had no effect on Chuffed at all. It now turns `isShowName` off.
+
+Chuffed's optional tip to itself is set through the control the capture revealed: a dropdown of
+tiers plus **"Other"**, where "Other" reveals a free box and the chosen figure lands in a hidden
+`chuffedAmount` field. It always goes through "Other", because every tier is an *addition* — there
+is no "nothing" among them, so a tier could only ever approximate what was asked for. The default is
+not small: a $10 donation arrives with **$4.00** already added.
+
+None of that control exists until an amount has been entered, so the tip is set after the amount,
+and what is read back is the hidden field rather than the box that was typed into — that field is
+what reaches the payment, and reporting "tip zeroed" off anything else would be a claim about money
+that nobody checked.
+
+### Stripe's moving iframe
+
+Card fields live in a cross-origin iframe whose name Stripe has now changed twice —
+`elements-inner-card`, then `elements-inner-payment`, and currently
+`elements-inner-accessory-target`. Matching on that name is why a whole run's card details were
+never filled: no frame matched, so every field was reported as one for the donor to type in, with
+nothing to say why.
+
+Nothing depends on the frame's name any more. Every frame on `js.stripe.com` is searched for the
+inputs themselves, the wait is for a card-number field rather than for a URL, and the field
+selectors lead with `autocomplete` attributes, which are the part Stripe has kept stable across both
+renames.
+
 `rankPoolFactor` is the cost dial. 1 verifies only what is needed and leaves the API's ordering in
-charge; the default of 3 verifies three campaigns per slot. Verification is cached for 15 minutes.
+charge; the default of 3 verifies three campaigns per slot. Verification is cached for
+`cacheTtlMinutes`.
+
+Stage 1 is where a run's minutes go, so `selectRecipients` emits an event as each candidate is
+opened and another when it resolves, and `plan`/`donate` render them as a progress line. It is
+measured in shortlist places *filled*: a candidate that fails verification is counted separately
+rather than advancing the bar, because attempts are unbounded while places are not. Cache hits are
+counted and reported once at the end instead of a line each — with a progress line naming the
+current candidate, per-candidate logging is scrollback nobody reads.
 
 ### Slots
 
@@ -197,9 +251,93 @@ profile and, per recipient:
 A field the driver cannot set with confidence is reported for the user to fill in rather than
 guessed at — this matters most for tips and amounts, where a wrong guess changes what is charged.
 
+### Currency, on the payment page
+
+The amount is configured in one currency and a checkout opens in whatever the platform thinks fits —
+the campaign's, or the visitor's. Typing `10` into a page set to EUR donates €10, not $10, so the
+currency is set **before** the amount (switching it re-renders and clears the field).
+
+- **GoFundMe** has a real control: a tag button showing the code, and a list of the currencies that
+  campaign accepts. It is switched and then read back to confirm. A campaign that does not offer the
+  configured currency is reported — `this campaign does not offer USD (it is in EUR)` — never fudged.
+- **Chuffed** shows the current code on a button ("You're donating in aud") that opens a "Change
+  Currency" modal holding a `select`; the choice only applies once **Save** is pressed. Two details
+  make that harder than it sounds, and both were got wrong first time round:
+  - the bundle contains two variants of the component, `impact-selector` and `donation-selector`,
+    and the payment page renders the second. Matching only the first found nothing — which is
+    indistinguishable from "this campaign offers no choice", so it changed nothing and said nothing.
+  - Chuffed's button component replaces whatever `data-test` it is handed with its own
+    `link-button`, so `[data-test="currency-conversion-save"]` never reaches the page. Save is
+    pressed by its label as well.
+
+  When the page really has no currency control, nothing is said: there is nothing to get wrong.
+
+The gated step is the one that has to be got right. Chuffed's payment form does not exist in the DOM
+until the challenge clears, so the driver announces the challenge *before* waiting and then watches
+for the form for the whole `donationTimeoutMs`. An earlier version waited 90 seconds in silence and
+then stopped looking — clearing the challenge after that did nothing at all, because nothing was
+watching when the form appeared.
+
+Two things can end that wait, and both must be able to:
+
+- **the form appearing**, which is the common case: clearing the challenge is enough by itself and
+  needs no keystroke;
+- **`press Enter once you are past the challenge`**, for when the page has not caught up, or the
+  person would simply rather say so. Enter shortens the wait to a short grace period rather than
+  ending it outright — the assertion is "I am through", not "the form is there".
+
+Whichever loses is called off. An abandoned readline on stdin keeps the process alive long after the
+run has printed its summary, so `waitPastGate` cancels the prompt in a `finally`. The prompt is
+offered only when a gate was actually detected and only when stdin is a terminal; a scheduled run
+watches the page and nothing else.
+
 Failures retry with a fresh page up to `retries` times. After `maxConsecutiveFailures` recipients
 fail in a row the run stops and prints the summary, so a dead card or a blocked session cannot
 quietly burn through the budget. Only confirmed donations are recorded as spent.
+
+### Saying things where they will be read
+
+Every instruction goes to two places: stdout, and a banner pinned to the top of the page itself
+(`src/notice.js`). The person is looking at a browser window, not at the console behind it, so a run
+that only prints "click donate" looks like a run that has hung. The banner is appended to
+`documentElement` so a React re-render cannot drop it, and carries `pointer-events: none` so it can
+never sit between someone and a button they need to press.
+
+The same reasoning applies to waiting: `waitForThanks` now repeats what it is waiting for and how
+long is left, on both platforms. Only the gated Chuffed path used to say anything.
+
+### The privacy banner is a web component
+
+A capture of the real page settled how this had to work. GoFundMe's banner is Transcend, and all the
+page contains is an **empty host div**:
+
+```html
+<script src="https://transcend-cdn.com/cm/.../airgap.js"></script>
+<div id="transcend-consent-manager" style="position: fixed; z-index: 2147483647;"></div>
+```
+
+Everything a person sees and clicks is built inside its **shadow root**, where `document.querySelector`
+cannot reach — so the first implementation could not have found a single button, whatever its
+wording. `clickDeepMatching` walks the light and shadow trees itself.
+
+The host is present on every GoFundMe page whether or not the banner is up, so an empty one is not
+treated as a banner: announcing "a privacy banner is up" on every donation would be noise.
+
+### Things that get in the way
+
+| what | what happens |
+| --- | --- |
+| GoFundMe's privacy strip | dismissed by choosing *not* to share. The refusals are matched in order — "don't share my data", "do not sell or share", "reject all", "only necessary" — and **"accept" is not among them**: dismissing a privacy prompt by consenting to everything is not dismissing it. A prompt whose buttons are not recognised is left alone and reported rather than guessed at, because clicking an unknown button on a page holding a card number is not worth the tidiness. |
+| Chrome's "save this card?" | turned off in the donation profile before Chrome starts (`autofill.credit_card_enabled`, `credentials_enable_service`, `profile.password_manager_enabled`), merging into the existing profile rather than replacing it — that profile also carries the Cloudflare clearance that makes the next run easier. |
+| Chuffed's "Unauthorised" page | not a bot gate and not a dead campaign, but a wall a person can walk through. The run says so and waits for the form to appear, exactly as it waits for a challenge. |
+
+### A closed tab is a decision
+
+Closing a payment tab means the donation is done, or that this recipient is being passed over on
+purpose. Either reading makes retrying wrong — it would reopen a payment page for a donation that is
+finished with — so `waitForThanks` reports `closed` distinctly from a timeout, the errors a closing
+tab throws are recognised (`isClosedError`), and the recipient is recorded as **skipped**: no retry,
+no contribution to the consecutive-failure count, nothing spent.
 
 ### Dry run by default
 
@@ -226,6 +364,14 @@ The detector is deliberately narrow. These campaign pages talk about security an
 constantly, so only wording that belongs to an interstitial counts, and a 404 is a dead campaign
 rather than a gate — a false positive would pass over a living campaign, which is the exact harm the
 feature exists to prevent.
+
+Narrow evidence is not enough on its own, though: **the evidence has to be blocking something.**
+Chuffed's payment page keeps its Turnstile iframe in the DOM after the challenge has passed, so a
+headful browser carrying clearance renders the form *and* still reports the frame. An early version
+announced a challenge there and asked the person to clear something that was not in front of them.
+So `gateIfBlocking` asks for the thing the page is supposed to give us first, and only reaches for an
+explanation when it is missing — `inspect` looks for the donate button, `prepare` for the amount
+field.
 
 Unexpected gates are appended to `gates.jsonl` beside the ledger, with the stage (`plan`, `donate`,
 `check`), the account, the URL, the kind and what gave it away, and surfaced by `gates`. Chuffed's
@@ -290,9 +436,9 @@ the full results, including what *was* found, for looking at afterwards.
 | card | `~/.config/palestine-donator/card.enc` | AES-256-GCM under a scrypt-derived passphrase, mode 0600 |
 | ledger | `~/.local/share/palestine-donator/ledger.jsonl` | append-only, one line per attempt |
 | bot gate log | `~/.local/share/palestine-donator/gates.jsonl` | append-only, unexpected gates only |
-| browser profile | `~/.local/share/palestine-donator/browser-profile/` | so cookie banners and Cloudflare clearance survive between runs |
+| browser profile | `~/.local/share/palestine-donator/browser-profile/` | so cookie banners and Cloudflare clearance survive between runs; Chrome is told not to restore the previous session's tabs, and any it restores anyway are closed at launch |
 | debug screenshots | `~/.local/share/palestine-donator/debug/` | `--debug`, written on failure only |
-| API + verification cache | `~/.cache/palestine-donator/` | 15 minute TTL; exchange rates 12 hours |
+| API + verification cache | `~/.cache/palestine-donator/` | `cacheTtlMinutes`, an hour by default; exchange rates 12 hours |
 
 `PALESTINE_DONATOR_HOME` relocates all of it. None of it lives in the repo.
 
@@ -314,7 +460,7 @@ bin/donate.js             CLI: plan | donate | card | config | check | gates | h
 src/config.js             defaults <- file <- flags, validation, recurrence window
 src/editor.js             locating and running $VISUAL/$EDITOR for `config edit`
 src/paths.js              where config, cache, data and the browser profile live
-src/cache.js              15-minute TTL disk cache, sha256 keys over sorted params
+src/cache.js              disk cache with a configurable TTL, sha256 keys over sorted params
 src/money.js              reading an amount *and its currency* off a page
 src/fx.js                 exchange rates, so totals can be ordered against each other
 src/api.js                gaza.onl client
@@ -348,7 +494,7 @@ because it does not render past Turnstile in a headless browser.
 
 ## Tests
 
-210 tests, no network and no browser: selection and both ranking stages, currency parsing and
+295 tests, no network and no browser: selection and both ranking stages, currency parsing and
 conversion, bot-gate detection and its log, the diagnostic's classification of findings, the browser
 session's lifecycle, budget arithmetic over the ledger
 including tips, the misconfigured-budget hard stop, config loading and editor resolution, card

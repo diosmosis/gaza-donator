@@ -121,6 +121,7 @@ export function createVerifier({
   fetchImpl,
   convert = null,
   onGate = () => {},
+  onCached = () => {},
 }) {
   const checks = config.verify ?? {};
 
@@ -201,7 +202,9 @@ export function createVerifier({
     if (!cache) return run();
 
     const { value, cached } = await cache.wrap(key, run);
-    if (cached) log(`  (verification for ${candidate.fqn} served from cache)`);
+    // Counted rather than announced: with a progress line saying what is being
+    // checked, a line per candidate is scrollback nobody reads.
+    if (cached) onCached(candidate);
     return value;
   };
 }

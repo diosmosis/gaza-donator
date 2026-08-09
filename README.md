@@ -30,7 +30,24 @@ page total is the truer number, so it decides the final order. Both are shown in
 
 `rankPoolFactor` is the cost dial: 3 (the default) verifies three campaigns per slot and gives the
 money to the least-funded of them; 1 verifies only what is needed and leaves the API's order in
-charge. Verification results are cached for 15 minutes, so re-running is cheap.
+charge. Verification results are cached for an hour, so re-running is cheap.
+
+That verification is where a run's minutes go — a campaign page per candidate — so `plan` and
+`donate` show a progress line while it happens:
+
+```
+[4/9]   44%  8 passed over  ~1m20s left  checking @someone@mastodon.social
+```
+
+The count is shortlist places **filled**, so a candidate that fails verification is counted as
+"passed over" without advancing the bar. On a terminal it is one line, rewritten; redirected to a
+file it prints periodically instead. `--no-verify`, or a period whose budget is already spent, opens
+no pages and shows no bar.
+
+`cacheTtlMinutes` (default 60) is how long API responses and verification results stay usable —
+`--cache-ttl 5` for a run that should look again sooner, `--no-cache` to ignore what is stored. It
+also sets the width of the bucket the recurrence window is rounded to, so that two runs inside the
+same hour ask the API the same question and share an entry rather than each fetching afresh.
 
 Campaigns do not all run in the same currency — a Chuffed page reading "$942" may be AUD, and plenty
 of GoFundMe campaigns are in EUR — so page totals are **converted into `currency` before they are
@@ -90,6 +107,7 @@ The file itself:
   "platforms": ["chuffed", "gofundme"],
   "maxRecipients": 25,
   "rankPoolFactor": 3,
+  "cacheTtlMinutes": 60,
   "includeStates": ["ACTIVE"],
   "excludeAccounts": [],
   "donor": {
@@ -105,8 +123,11 @@ The file itself:
 inside any rolling 7 days, so re-running mid-week tops up other people instead of doubling up.
 
 `tipAmount` is what the fundraising platform itself gets per donation, on top of `donationAmount`.
-Both sites ask for one and default it to a nonzero percentage; at the default of `0` the drivers
-push it back down to nothing so the whole amount reaches the family. A tip is charged to the same
+Both sites ask for one and default it to a nonzero amount — Chuffed suggests **$4.00 on a $10
+donation** — and at the default of `0` the drivers push it back down to nothing so the whole amount
+reaches the family. On Chuffed that means choosing "Other" from its tier dropdown and entering the
+figure, since every tier it offers is an addition; the result is confirmed against the hidden field
+that carries what is actually charged. A tip is charged to the same
 card, so it counts against `totalAmount` — at `$10 + $1` a `$200` budget funds 18 recipients, not
 20.
 
@@ -141,7 +162,7 @@ node bin/donate.js gates                     # what has been blocking us lately
 ```
 
 Useful flags: `--total`, `--amount`, `--tip`, `--period weekly|monthly|10d`, `--limit`, `--yes`,
-`--no-verify`, `--no-cache`, `--clear-cache`, `--debug`.
+`--no-verify`, `--cache-ttl`, `--no-cache`, `--clear-cache`, `--debug`.
 
 For a scheduled run, set `PALESTINE_DONATOR_PASSPHRASE` and pass `--yes`. The browser step still
 needs a display and a person — see below.
@@ -158,6 +179,12 @@ quietly passed over.
 So every page load is checked for one — a challenge iframe (Cloudflare, hCaptcha, reCAPTCHA,
 DataDome, PerimeterX), interstitial wording, or a 401/403/429/503 — and unexpected ones are appended
 to `~/.local/share/palestine-donator/gates.jsonl` and called out in the run's summary.
+
+**A challenge only counts when it is actually in the way.** Chuffed's payment page keeps its
+Turnstile widget in the DOM after it has passed, so a browser carrying clearance renders the form
+*and* still shows the frame. The question asked is never "is there a challenge?" but "is what we
+need missing, and is a challenge why?" — otherwise the run announces a gate that is not in front of
+you.
 
 ```sh
 node bin/donate.js gates          # what has been getting in the way, grouped
@@ -181,11 +208,38 @@ Instead, `donate --execute` opens a **visible** browser with a persistent profil
 recipient:
 
 1. navigates to the campaign's payment page,
-2. fills in the amount, your donor details and the card, and sets the platform tip to `tipAmount`
-   (zero by default, so the whole amount reaches the family),
-3. prints what it filled and what it could not, then waits while **you** clear any challenge and
-   press the site's own donate button,
-4. watches for the confirmation page and records the result.
+2. puts the checkout in your configured `currency` if it opened in another one, then fills in the
+   amount, your donor details and the card, and sets the platform tip to `tipAmount` (zero by
+   default, so the whole amount reaches the family),
+3. turns off both mailing-list opt-ins and, if `donor.anonymous` is set, the "show my name" toggle,
+4. says what it filled and what it could not — **in the browser window as well as the terminal**,
+   since that is where you are looking — then waits while you clear any challenge and press the
+   site's own donate button,
+5. watches for the confirmation page, saying how long is left while it waits, and records the result.
+
+Things it gets out of your way on the way through: GoFundMe's privacy strip (dismissed by choosing
+*not* to share — never by accepting; its buttons live in a shadow root, so they are reached by
+walking the tree rather than by a selector), Chrome's own "save this card?" and "save password?" prompts
+(turned off in the donation profile), and Chuffed's "Unauthorised" wall, which it waits at while you
+log in rather than giving up on that recipient.
+
+**Closing the tab is an answer.** If you close a payment tab, that recipient is skipped rather than
+retried: either the donation went through or you decided against this one, and reopening the page
+would be wrong in both readings.
+
+When a challenge appears, the run says so, **keeps watching**, and asks:
+
+```
+  Chuffed is showing a cloudflare-turnstile challenge — clear it in the browser
+  window and the form will be filled in as soon as it appears
+  >> press Enter once you are past the challenge:
+```
+
+Either ends the wait. Clear the challenge and the form usually fills itself without you touching the
+terminal; press Enter and it looks immediately rather than on its next poll. The prompt appears only
+when a challenge was actually detected, and only when someone is there to answer it — a scheduled run
+just watches the page. Failing both, it waits out `donationTimeoutMs` (5 minutes by default) and
+falls back to "fill it in yourself".
 
 Failures retry twice with a fresh page; three failed recipients in a row stop the run and print the
 summary, so a broken card or a blocked session cannot quietly burn through the budget.
@@ -199,7 +253,7 @@ summary, so a broken card or a blocked session cannot quietly burn through the b
 | ledger | `~/.local/share/palestine-donator/ledger.jsonl` |
 | bot gate log | `~/.local/share/palestine-donator/gates.jsonl` |
 | browser profile | `~/.local/share/palestine-donator/browser-profile/` |
-| API + verification cache (15 min TTL, exchange rates 12 h) | `~/.cache/palestine-donator/` |
+| API + verification cache (`cacheTtlMinutes`, exchange rates 12 h) | `~/.cache/palestine-donator/` |
 
 Set `PALESTINE_DONATOR_HOME` to put all of it somewhere else. None of it lives in the repo.
 
@@ -209,7 +263,7 @@ Set `PALESTINE_DONATOR_HOME` to put all of it somewhere else. None of it lives i
 npm test
 ```
 
-210 tests, no network and no browser: selection and both ranking stages, currency parsing and
+295 tests, no network and no browser: selection and both ranking stages, currency parsing and
 conversion, bot-gate detection and its log, the diagnostic's classification of findings, the browser
 session's lifecycle, budget arithmetic over the ledger
 (including tips), the misconfigured-budget hard stop, config loading and editor resolution, card
@@ -263,6 +317,16 @@ Two things keep the report trustworthy, both learned from the first full run:
 Every selector lives in one `SELECTORS` object per driver — `src/drivers/chuffed.js` and
 `src/drivers/gofundme.js` — as ordered fallback lists. If a run reports fields under "fill in
 yourself" that it used to fill, that object is the thing to fix.
+
+Chuffed's payment page cannot be opened without clearing a challenge, so its selectors are read out
+of the site's own `payment.js` bundle (linked from the page source) rather than guessed at, and
+checked in the test suite against `test/fixtures/chuffed-payment.html` — a capture of the rendered
+page. A selector that matches nothing there looks exactly like a control the page does not have, so
+that fixture is what tells the two apart. To refresh it: open a payment page, clear the challenge,
+and copy the `outerHTML` of the form. Stripe's
+card fields are deliberately **not** matched by iframe name — that name has changed twice and each
+change silently emptied every card field — but by looking for the inputs themselves in any frame
+Stripe owns.
 Chuffed's tip field is the likeliest one to need it: its payment page only renders past a Cloudflare
 challenge, so those selectors are written from the page's conventions rather than observed. A tip
 the driver cannot set with confidence is reported for you to set by hand rather than guessed at.

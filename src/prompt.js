@@ -29,6 +29,34 @@ export async function ask(question, { defaultValue = '' } = {}) {
   }
 }
 
+/**
+ * Ask for Enter, but let the caller stop waiting.
+ *
+ * Used where something else may answer the question first — the payment form
+ * appearing on its own, say. Whoever wins, the other has to be called off, or
+ * a readline left open on stdin keeps the whole process alive after the run has
+ * finished.
+ *
+ * @returns {{promise: Promise<boolean>, cancel: () => void}} resolves true if
+ *   Enter was pressed, false if the wait was cancelled
+ */
+export function promptEnter(message) {
+  // Nobody is watching a scheduled run; a prompt that can never be answered
+  // would just be a way to hang.
+  if (!isInteractive()) return { promise: new Promise(() => {}), cancel: () => {} };
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const controller = new AbortController();
+
+  const promise = rl
+    .question(message, { signal: controller.signal })
+    .then(() => true)
+    .catch(() => false)
+    .finally(() => rl.close());
+
+  return { promise, cancel: () => controller.abort() };
+}
+
 /** y/N confirmation. Anything but an explicit yes is a no. */
 export async function confirm(question, { defaultYes = false } = {}) {
   const suffix = defaultYes ? '[Y/n]' : '[y/N]';

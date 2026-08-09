@@ -17,18 +17,32 @@ export class Progress {
    * @param {boolean} [options.tty]      rewrite one line instead of printing many
    * @param {number} [options.everyMs]   how often to print when not a terminal
    * @param {() => number} [options.now] clock, injectable for tests
+   * @param {string} [options.problemWord] what a non-ok item is called
+   * @param {string} [options.zeroWord]    what to say when there are none
    */
-  constructor({ total, stream = process.stderr, tty = null, everyMs = 15_000, now = Date.now }) {
+  constructor({
+    total,
+    stream = process.stderr,
+    tty = null,
+    everyMs = 15_000,
+    now = Date.now,
+    problemWord = 'problem(s)',
+    zeroWord = 'no problems',
+  }) {
     this.total = total;
     this.stream = stream;
     this.tty = tty ?? Boolean(stream.isTTY);
     this.everyMs = everyMs;
     this.now = now;
     this.startedAt = now();
+    this.problemWord = problemWord;
+    this.zeroWord = zeroWord;
     this.done = 0;
     this.problems = 0;
     this.lastPrint = 0;
+    this.printed = false;
     this.active = false;
+    this.label = '';
   }
 
   /** Record one finished item and redraw. */
@@ -38,7 +52,44 @@ export class Progress {
     this.render(label);
   }
 
-  render(label = '') {
+  /**
+   * Count something that went wrong without counting it as done.
+   *
+   * Some work is measured in places filled rather than attempts made — a
+   * candidate that fails verification does not fill a slot, and pretending it
+   * did would run the bar past the end.
+   */
+  skip({ label = '' } = {}) {
+    this.problems += 1;
+    this.render(label);
+  }
+
+  /**
+   * Print something above the progress line without leaving debris behind it.
+   * Anything a run wants to say while the bar is live has to go through here.
+   */
+  around(write) {
+    if (!this.tty || !this.active) {
+      write();
+      return;
+    }
+    this.stream.write(`\r${CLEAR}`);
+    write();
+    this.render(this.label);
+  }
+
+  /**
+   * Say what is being worked on, without changing the counts.
+   *
+   * Terminal only: on a redirected run this would be a line per item, which is
+   * a log nobody wants when the counts have not moved.
+   */
+  status(label) {
+    if (this.tty) this.render(label);
+  }
+
+  render(label = this.label) {
+    this.label = label;
     const line = this.line(label);
     if (this.tty) {
       this.active = true;
@@ -47,9 +98,12 @@ export class Progress {
     }
     // Always print the first and the last, so a redirected run shows that it
     // started and that it finished; everything between is on the interval.
+    // Throttling on time alone: work measured in places filled can leave `done`
+    // standing still for a while, and that must not become a line per attempt.
     const at = this.now();
     const due = at - this.lastPrint >= this.everyMs;
-    if (!due && this.done > 1 && this.done < this.total) return;
+    if (this.printed && !due && this.done < this.total) return;
+    this.printed = true;
     this.lastPrint = at;
     this.stream.write(`${line}\n`);
   }
@@ -67,7 +121,7 @@ export class Progress {
     const parts = [
       `[${String(this.done).padStart(width)}/${this.total}]`,
       `${String(percent).padStart(3)}%`,
-      this.problems > 0 ? `${this.problems} problem(s)` : 'no problems',
+      this.problems > 0 ? `${this.problems} ${this.problemWord}` : this.zeroWord,
       this.remaining(),
       label,
     ].filter(Boolean);

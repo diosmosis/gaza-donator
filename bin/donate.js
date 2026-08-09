@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   DEFAULT_CONFIG,
+  cacheTtlMs,
   configProblem,
   describeConfig,
   loadConfig,
@@ -57,6 +58,7 @@ const OPTIONS = {
   yes: { type: 'boolean', default: false },
   execute: { type: 'boolean', default: false },
   concurrency: { type: 'string' },
+  'cache-ttl': { type: 'string' },
   deep: { type: 'boolean', default: false },
   json: { type: 'string' },
   'no-cache': { type: 'boolean', default: false },
@@ -92,6 +94,7 @@ Options
   --yes              skip the confirmation prompt
   --execute          actually donate (donate command only)
   --no-verify        skip the campaign / Gaza Verified checks (faster, less safe)
+  --cache-ttl <mins> how long cached results stay usable (default 60)
   --no-cache         ignore cached API and verification results
   --clear-cache      delete cached results and exit
   --debug            screenshot the page when a donation fails
@@ -126,6 +129,7 @@ async function main() {
       totalAmount: numberFlag(flags.total, '--total'),
       donationAmount: numberFlag(flags.amount, '--amount'),
       tipAmount: numberFlag(flags.tip, '--tip'),
+      cacheTtlMinutes: numberFlag(flags['cache-ttl'], '--cache-ttl'),
       recurrence: flags.period,
       currency: flags.currency?.toUpperCase(),
       debug: flags.debug || undefined,
@@ -160,7 +164,14 @@ async function main() {
 
 /** Shared plan/select step, plus the table. */
 async function planAndReport({ config, paths, flags }) {
-  const log = (message) => console.log(message);
+  // Verification opens a campaign page per candidate and is where the minutes
+  // go, so it gets a progress line. It is created on the first candidate,
+  // because only then is the size of the shortlist known — and a run that
+  // verifies nothing should not print a bar at all.
+  let progress = null;
+  const log = (message) =>
+    progress ? progress.around(() => console.log(message)) : console.log(message);
+
   const result = await planRun({
     config,
     paths,
@@ -168,7 +179,20 @@ async function planAndReport({ config, paths, flags }) {
     verify: !flags['no-verify'],
     limit: numberFlag(flags.limit, '--limit', { integer: true }),
     log,
+    onVerifyStart: (candidate, { target }) => {
+      progress ??= new Progress({
+        total: target,
+        problemWord: 'passed over',
+        zeroWord: 'none passed over',
+      });
+      progress.status(`checking ${candidate.fqn}`);
+    },
+    // A candidate that fails verification does not fill a place on the
+    // shortlist, so it is counted but does not advance the bar.
+    onVerifyResult: (candidate, { ok }) =>
+      ok ? progress.tick({ label: candidate.fqn }) : progress.skip({ label: candidate.fqn }),
   });
+  progress?.finish();
 
   const periodLabel = `last ${recurrenceDays(config.recurrence)}d`;
   console.log('');
@@ -367,7 +391,11 @@ async function commandCard({ paths, action }) {
  * could submit anything.
  */
 async function commandCheck({ config, paths, flags }) {
-  const cache = new Cache({ dir: paths.cacheDir, read: !flags['no-cache'] });
+  const cache = new Cache({
+    dir: paths.cacheDir,
+    read: !flags['no-cache'],
+    ttlMs: cacheTtlMs(config),
+  });
   const api = new GazaApi({ cache });
 
   const [accountsResult, statsResult] = await Promise.all([

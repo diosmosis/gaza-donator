@@ -390,3 +390,51 @@ test('selectRecipients returns nothing when there is no budget for anyone', asyn
   const { chosen } = await selectRecipients({ candidates: [candidate()], ...DEFAULTS, slots: 0 });
   assert.deepEqual(chosen, []);
 });
+
+test('selectRecipients announces each verification so a caller can show progress', async () => {
+  // Verification opens a campaign page per candidate; without these events a
+  // plan looks frozen for minutes.
+  const events = [];
+  const candidates = ['a', 'b', 'c', 'd'].map((id) =>
+    candidate({ fqn: `@${id}@x`, accountUrl: `https://${id}` }),
+  );
+
+  await selectRecipients({
+    candidates,
+    ...DEFAULTS,
+    slots: 1,
+    poolFactor: 2,
+    verify: async (c) => (c.fqn === '@a@x' ? { ok: false, note: 'closed' } : { ok: true }),
+    onVerifyStart: (c, { filled, target }) => events.push(`start ${c.fqn} ${filled}/${target}`),
+    onVerifyResult: (c, { ok }) => events.push(`${ok ? 'ok' : 'dropped'} ${c.fqn}`),
+  });
+
+  assert.deepEqual(events, [
+    'start @a@x 0/2',
+    'dropped @a@x',
+    'start @b@x 0/2',
+    'ok @b@x',
+    'start @c@x 1/2',
+    'ok @c@x',
+  ]);
+});
+
+test('the shortlist size is known from the first event, before any page is opened', async () => {
+  // The caller sizes its progress bar from this, so it has to be right on the
+  // very first callback rather than settling later.
+  const targets = [];
+  const candidates = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) =>
+    candidate({ fqn: `@${id}@x`, accountUrl: `https://${id}` }),
+  );
+
+  await selectRecipients({
+    candidates,
+    ...DEFAULTS,
+    slots: 2,
+    poolFactor: 3,
+    verify: async () => ({ ok: true }),
+    onVerifyStart: (c, { target }) => targets.push(target),
+  });
+
+  assert.deepEqual(targets, [6, 6, 6, 6, 6, 6], '2 slots x 3 = a shortlist of 6');
+});
