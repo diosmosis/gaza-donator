@@ -4,6 +4,7 @@ import {
   displayWidth,
   formatAge,
   formatMoney,
+  renderBudget,
   renderRecipients,
   renderGateLog,
   renderGates,
@@ -211,4 +212,59 @@ test('the gate log reads as a list of places to look', () => {
 
 test('an empty gate log says so, with where it would be', () => {
   assert.match(renderGateLog([], { file: '/tmp/gates.jsonl' }), /no bot gates recorded/);
+});
+
+test('the budget block explains the slot count when the period is part spent', () => {
+  const out = renderBudget(
+    { spent: 66, remaining: 154, perRecipient: 11, capacity: 20, slots: 14 },
+    {
+      currency: 'USD',
+      totalAmount: 220,
+      recurrence: 'monthly',
+      donationAmount: 10,
+      tipAmount: 1,
+      donations: 6,
+      eligible: 27,
+    },
+  );
+
+  assert.match(out, /already donated this period \$66\.00/);
+  assert.match(out, /remaining \$154\.00/);
+  assert.match(out, /14 slots at \$10\.00 \+ \$1\.00 platform tip \(\$11\.00 each\)/);
+  assert.match(
+    out,
+    /\$220\.00 covers 20 slots; 6 donation\(s\) already made this period spent \$66\.00, leaving 14/,
+    'the 20-vs-14 gap is spelled out next to the slot count',
+  );
+  assert.match(out, /27 eligible candidate\(s\)/);
+});
+
+test('the budget block leaves out the explanation when nothing is spent yet', () => {
+  const out = renderBudget(
+    { spent: 0, remaining: 220, perRecipient: 11, capacity: 20, slots: 20 },
+    {
+      currency: 'USD',
+      totalAmount: 220,
+      recurrence: 'monthly',
+      donationAmount: 10,
+      tipAmount: 1,
+      donations: 0,
+      eligible: 27,
+    },
+  );
+
+  assert.match(out, /20 slots at/);
+  assert.doesNotMatch(out, /covers/, 'nothing to reconcile, so nothing to explain');
+});
+
+test('the budget block drops the tip wording when the platform is not tipped', () => {
+  const out = renderBudget(
+    { spent: 0, remaining: 100, perRecipient: 10, capacity: 10, slots: 10 },
+    { currency: 'USD', totalAmount: 100, recurrence: 'weekly', donationAmount: 10, limit: 3 },
+  );
+
+  assert.match(out, /10 slots at \$10\.00 each/);
+  assert.doesNotMatch(out, /platform tip/);
+  assert.match(out, /limited to 3/);
+  assert.doesNotMatch(out, /eligible/, 'history has no candidate list to report');
 });

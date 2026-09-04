@@ -15,6 +15,14 @@ export const dim = (text) => paint('2', text);
 export const green = (text) => paint('32', text);
 export const yellow = (text) => paint('33', text);
 export const red = (text) => paint('31', text);
+export const cyan = (text) => paint('36', text);
+
+/**
+ * A section title. Bold alone is already what the table headers use, so the
+ * colour is what separates "this is a new block" from "this is a column name"
+ * when a screen of output scrolls past.
+ */
+export const heading = (text) => paint('1;36', text);
 
 /** Format money without pulling in a locale dependency for other currencies. */
 export function formatMoney(amount, currency = 'USD') {
@@ -116,12 +124,64 @@ export function renderTable(rows, columns) {
 
   const out = [
     line(columns.map((column) => bold(column.header))),
-    `  ${widths.map((width) => '─'.repeat(width)).join('  ')}`,
+    dim(`  ${widths.map((width) => '─'.repeat(width)).join('  ')}`),
   ];
   for (const row of rows) {
     out.push(line(columns.map((column) => String(row[column.key] ?? ''))));
   }
   return out.join('\n');
+}
+
+/**
+ * The budget block above the plan table.
+ *
+ * The slot count is the number people misread, because it is what the
+ * *remaining* budget buys rather than what the configured total buys. When part
+ * of the period has already been donated away the two differ, so the
+ * subtraction is spelled out here instead of being left to be re-derived from
+ * the ledger by hand.
+ */
+export function renderBudget(
+  budget,
+  {
+    currency,
+    totalAmount,
+    recurrence,
+    donationAmount,
+    tipAmount = 0,
+    donations = 0,
+    eligible = null,
+    limit = null,
+  },
+) {
+  const money = (amount) => formatMoney(amount, currency);
+  const slotWord = (count) => `${count} slot${count === 1 ? '' : 's'}`;
+
+  const lines = [
+    `${heading('Budget')} ${bold(money(totalAmount))} ${dim(`per ${recurrence}`)}` +
+      ` ${dim('·')} already donated this period ` +
+      (budget.spent > 0 ? yellow(money(budget.spent)) : dim(money(0))) +
+      ` ${dim('·')} remaining ${green(money(budget.remaining))}`,
+    (eligible === null ? '' : `${bold(String(eligible))} eligible candidate(s) ${dim('·')} `) +
+      `${bold(slotWord(budget.slots))} at ${green(money(donationAmount))}` +
+      (tipAmount > 0
+        ? ` + ${money(tipAmount)} platform tip ${dim(`(${money(budget.perRecipient)} each)`)}`
+        : ' each') +
+      (limit ? dim(`, limited to ${limit}`) : ''),
+  ];
+
+  // Only worth explaining when the two numbers actually disagree.
+  if (budget.spent > 0) {
+    lines.push(
+      dim(
+        `  ${money(totalAmount)} covers ${slotWord(budget.capacity)}; ` +
+          `${donations} donation(s) already made this period spent ${money(budget.spent)}, ` +
+          `leaving ${budget.slots}`,
+      ),
+    );
+  }
+
+  return lines.join('\n');
 }
 
 /** The plan table: who gets paid, and what they have received lately. */
@@ -139,7 +199,7 @@ export function renderRecipients(chosen, { currency, donationAmount, tipAmount =
       n: String(index + 1),
       who: truncate(candidate.displayName || candidate.fqn, 28),
       fqn: dim(candidate.fqn),
-      platform: platformLabel(candidate.platform),
+      platform: cyan(platformLabel(candidate.platform)),
       received: formatMoney(candidate.receivedInPeriod, candidate.currency ?? currency),
       total: dim(formatMoney(candidate.receivedTotal ?? 0, candidate.currency ?? currency)),
       raised:
@@ -182,8 +242,8 @@ export function renderRejections(rejected, { maxReasonWidth = 90 } = {}) {
   const rows = [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([reason, count]) => ({
-      count: String(count),
-      reason: truncate(String(reason).replace(/\s+/g, ' '), maxReasonWidth),
+      count: yellow(String(count)),
+      reason: dim(truncate(String(reason).replace(/\s+/g, ' '), maxReasonWidth)),
     }));
 
   return renderTable(rows, [
@@ -221,12 +281,12 @@ export function renderSummary(results, { currency, totalAmount, spentBefore }) {
   const remaining = Math.max(0, totalAmount - spentBefore - donated - tipped);
   return [
     '',
-    bold('Summary'),
+    heading('Summary'),
     table,
     '',
-    `  donated this run: ${bold(formatMoney(donated, currency))} to ${succeeded.length} recipient(s)`,
+    `  donated this run: ${bold(green(formatMoney(donated, currency)))} to ${succeeded.length} recipient(s)`,
     ...(tipped > 0 ? [`  tipped to the platforms: ${formatMoney(tipped, currency)}`] : []),
-    `  remaining in this period: ${formatMoney(remaining, currency)} of ${formatMoney(totalAmount, currency)}`,
+    `  remaining in this period: ${green(formatMoney(remaining, currency))} ${dim(`of ${formatMoney(totalAmount, currency)}`)}`,
   ].join('\n');
 }
 
@@ -241,7 +301,7 @@ export function renderCheckReport(results, { groups, elapsedMs, deep = false }) 
   const out = [];
 
   out.push('');
-  out.push(bold('Summary'));
+  out.push(heading('Summary'));
   out.push(
     `  checked ${results.length} campaign(s) in ${formatDuration(elapsedMs)}: ` +
       `${green(`${results.length - failed.length} ok`)}, ` +
@@ -305,7 +365,7 @@ export function renderCheckReport(results, { groups, elapsedMs, deep = false }) 
 
   if (failed.length > 0) {
     out.push('');
-    out.push(bold('Campaigns to look at'));
+    out.push(heading('Campaigns to look at'));
     for (const result of failed) {
       out.push('');
       out.push(`  ${result.fqn} ${dim(`(${platformLabel(result.platform) || 'unknown platform'})`)}`);
@@ -342,7 +402,7 @@ export function renderGates(seen, { total = seen.length, file = null } = {}) {
 
   return [
     '',
-    bold('Bot gates'),
+    heading('Bot gates'),
     renderTable(rows, [
       { key: 'who', header: 'account' },
       { key: 'kind', header: 'gate' },
@@ -391,7 +451,12 @@ export function renderHistory(entries, { currency }) {
       who: entry.fqn ?? '?',
       amount: formatMoney(entry.amount, entry.currency ?? currency),
       tip: dim(formatMoney(entry.tip ?? 0, entry.currency ?? currency)),
-      status: entry.status === 'success' ? green(entry.status) : yellow(entry.status),
+      status:
+        entry.status === 'success'
+          ? green(entry.status)
+          : entry.status === 'failed'
+            ? red(entry.status)
+            : yellow(entry.status),
       note: dim([entry.dryRun ? 'dry-run' : '', entry.note ?? ''].filter(Boolean).join(' ')),
     }));
 

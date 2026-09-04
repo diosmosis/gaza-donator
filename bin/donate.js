@@ -35,7 +35,9 @@ import {
   dim,
   formatMoney,
   green,
+  heading,
   red,
+  renderBudget,
   renderCheckReport,
   renderGateLog,
   renderGates,
@@ -197,25 +199,21 @@ async function planAndReport({ config, paths, flags }) {
   const periodLabel = `last ${recurrenceDays(config.recurrence)}d`;
   console.log('');
   console.log(
-    `${bold('Budget')} ${formatMoney(config.totalAmount, config.currency)} per ${config.recurrence}` +
-      ` · already donated this period ${formatMoney(result.budget.spent, config.currency)}` +
-      ` · remaining ${formatMoney(result.budget.remaining, config.currency)}`,
-  );
-  console.log(
-    dim(
-      `${result.ranked.length} eligible candidate(s); ` +
-        `${result.budget.slots} slot(s) at ${formatMoney(config.donationAmount, config.currency)}` +
-        (config.tipAmount > 0
-          ? ` + ${formatMoney(config.tipAmount, config.currency)} platform tip ` +
-            `(${formatMoney(result.budget.perRecipient, config.currency)})`
-          : '') +
-        ' each' +
-        (flags.limit ? `, limited to ${flags.limit}` : ''),
-    ),
+    renderBudget(result.budget, {
+      currency: config.currency,
+      totalAmount: config.totalAmount,
+      recurrence: config.recurrence,
+      donationAmount: config.donationAmount,
+      tipAmount: config.tipAmount,
+      // What the missing slots went on, counted the same way the budget was.
+      donations: result.ledger.successesSince(result.since).length,
+      eligible: result.ranked.length,
+      limit: flags.limit,
+    }),
   );
 
   console.log('');
-  console.log(bold('Recipients'));
+  console.log(heading('Recipients'));
   console.log(renderRecipients(result.chosen, { ...config, periodLabel }));
 
   const warnings = result.chosen.flatMap((candidate) =>
@@ -223,12 +221,12 @@ async function planAndReport({ config, paths, flags }) {
   );
   if (warnings.length > 0) {
     console.log('');
-    console.log(yellow('Warnings'));
-    console.log(warnings.join('\n'));
+    console.log(bold(yellow('Warnings')));
+    console.log(yellow(warnings.join('\n')));
   }
 
   console.log('');
-  console.log(bold('Not selected'));
+  console.log(heading('Not selected'));
   console.log(renderRejections(result.rejected));
 
   const gates = renderGates(result.gates ?? [], {
@@ -422,7 +420,7 @@ async function commandCheck({ config, paths, flags }) {
   }
 
   console.log(
-    `${bold('Checking')} ${selected.length} Gaza Verified campaign(s) ` +
+    `${heading('Checking')} ${selected.length} Gaza Verified campaign(s) ` +
       `(${[...platforms].map(([name, count]) => `${count} ${name}`).join(', ')}), ` +
       `${concurrency} at a time${flags.deep ? ', payment forms included' : ''}`,
   );
@@ -481,7 +479,7 @@ async function commandConfig({ file, action }) {
 
     case 'show': {
       const exists = fs.existsSync(configFile);
-      console.log(`${bold('config file')} ${configFile}${exists ? '' : dim(' (does not exist — showing defaults)')}`);
+      console.log(`${heading('config file')} ${configFile}${exists ? '' : dim(' (does not exist — showing defaults)')}`);
       // Deliberately unvalidated: showing a broken configuration is the point.
       const { config } = loadConfig({ file: exists ? configFile : undefined, validate: false });
       console.log(JSON.stringify(config, null, 2));
@@ -551,7 +549,7 @@ async function commandGates({ paths, action }) {
   }
 
   const entries = log.all();
-  console.log(`${bold('Bot gates')} ${dim(paths.gatesFile)}`);
+  console.log(`${heading('Bot gates')} ${dim(paths.gatesFile)}`);
   console.log(renderGateLog(summariseGates(entries), { file: paths.gatesFile }));
 
   if (entries.length > 0) {
@@ -576,7 +574,7 @@ async function commandHistory({ config, paths }) {
   const since = windowStart(config, new Date());
   const entries = ledger.since(since);
 
-  console.log(`${bold('History')} ${dim(`since ${since.toISOString().slice(0, 10)}`)}`);
+  console.log(`${heading('History')} ${dim(`since ${since.toISOString().slice(0, 10)}`)}`);
   console.log(renderHistory(entries, { currency: config.currency }));
 
   const budget = budgetFor({
@@ -587,11 +585,15 @@ async function commandHistory({ config, paths }) {
     maxRecipients: config.maxRecipients,
   });
   console.log('');
-  const tipped = entries.some((entry) => Number(entry.tip) > 0);
   console.log(
-    `  ${tipped ? 'donated, including platform tips' : 'donated'}: ` +
-      `${formatMoney(budget.spent, config.currency)} · ` +
-      `remaining in this period: ${formatMoney(budget.remaining, config.currency)}`,
+    renderBudget(budget, {
+      currency: config.currency,
+      totalAmount: config.totalAmount,
+      recurrence: config.recurrence,
+      donationAmount: config.donationAmount,
+      tipAmount: config.tipAmount,
+      donations: ledger.successesSince(since).length,
+    }),
   );
   return 0;
 }

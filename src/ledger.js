@@ -64,6 +64,11 @@ export class Ledger {
     });
   }
 
+  /** The donations that actually went through since `since`. */
+  successesSince(since) {
+    return this.since(since).filter((entry) => entry.status === STATUS.SUCCESS);
+  }
+
   /**
    * Total successfully charged to the card since `since`, in the ledger's
    * currency. Platform tips are part of the charge, so they count against the
@@ -71,19 +76,12 @@ export class Ledger {
    * have no `tip` field and contribute nothing extra.
    */
   spentSince(since) {
-    return this.since(since)
-      .filter((entry) => entry.status === STATUS.SUCCESS)
-      .reduce((total, entry) => total + chargeOf(entry), 0);
+    return this.successesSince(since).reduce((total, entry) => total + chargeOf(entry), 0);
   }
 
   /** FQNs successfully donated to since `since`. */
   recipientsSince(since) {
-    return new Set(
-      this.since(since)
-        .filter((entry) => entry.status === STATUS.SUCCESS)
-        .map((entry) => entry.fqn)
-        .filter(Boolean),
-    );
+    return new Set(this.successesSince(since).map((entry) => entry.fqn).filter(Boolean));
   }
 
   /**
@@ -138,17 +136,24 @@ export function chargeOf(entry) {
  * @param {number} [options.tipAmount]    platform tip per recipient
  * @param {number} options.spent          already donated this window
  * @param {number} options.maxRecipients
- * @returns {{remaining: number, slots: number, spent: number, perRecipient: number}}
+ * @returns {{remaining: number, slots: number, spent: number, perRecipient: number,
+ *            capacity: number}}
  */
 export function budgetFor({ totalAmount, donationAmount, tipAmount = 0, spent, maxRecipients }) {
   const remaining = Math.max(0, round2(totalAmount - spent));
   // A tip is charged with every donation, so a slot costs both.
   const perRecipient = round2(donationAmount + tipAmount);
   const affordable = Math.floor(remaining / perRecipient + 1e-9);
+  // What an untouched budget would have bought. Only reported, never spent
+  // against: a run that finds fewer slots than this is usually a run that has
+  // already donated some of the period away, and saying so beats re-deriving
+  // it from the ledger by hand.
+  const capacity = Math.floor(totalAmount / perRecipient + 1e-9);
   return {
     spent: round2(spent),
     remaining,
     perRecipient,
+    capacity: Math.max(0, Math.min(capacity, maxRecipients)),
     slots: Math.max(0, Math.min(affordable, maxRecipients)),
   };
 }

@@ -98,12 +98,14 @@ test('budgetFor turns the remaining budget into whole donations', () => {
     spent: 0,
     remaining: 200,
     perRecipient: 10,
+    capacity: 20,
     slots: 20,
   });
   assert.deepEqual(budgetFor({ totalAmount: 200, donationAmount: 10, spent: 155, maxRecipients: 25 }), {
     spent: 155,
     remaining: 45,
     perRecipient: 10,
+    capacity: 20,
     slots: 4,
   });
 });
@@ -130,6 +132,36 @@ test('tips already charged count against the period budget', () => {
   assert.equal(ledger.spentSince(since), 21.5);
   assert.equal(ledger.all()[0].tip, 1.5);
   assert.ok(!('tip' in ledger.all()[1]), 'a zero tip is not written at all');
+});
+
+test('capacity is what the untouched budget would have bought', () => {
+  const budget = budgetFor({
+    totalAmount: 220,
+    donationAmount: 10,
+    tipAmount: 1,
+    spent: 66,
+    maxRecipients: 25,
+  });
+  assert.equal(budget.capacity, 20, '220 / 11');
+  assert.equal(budget.slots, 14, '154 / 11, once the 66 already spent is taken off');
+});
+
+test('capacity is capped by maxRecipients, like slots are', () => {
+  const budget = budgetFor({ totalAmount: 200, donationAmount: 10, spent: 0, maxRecipients: 3 });
+  assert.equal(budget.capacity, 3);
+  assert.equal(budget.slots, 3);
+});
+
+test('successesSince ignores the attempts that never charged the card', () => {
+  const { file } = tempLedger();
+  const ledger = new Ledger(file);
+  ledger.record(entry({ amount: 10, tip: 1 }));
+  ledger.record(entry({ amount: 0, status: STATUS.FAILED }));
+  ledger.record(entry({ amount: 10, tip: 1 }));
+
+  const since = new Date(Date.now() - 60_000);
+  assert.equal(ledger.successesSince(since).length, 2);
+  assert.equal(ledger.spentSince(since), 22);
 });
 
 test('budgetFor never proposes more recipients than the cap', () => {
