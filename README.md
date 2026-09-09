@@ -69,6 +69,23 @@ platform's own arithmetic.
 gaza-verified.org frequently lists only the Mastodon account and no fundraiser link. That is normal
 and is not treated as a failure; it produces a warning saying there was nothing to compare against.
 
+### "Live" means a one-off donation can actually be made
+
+Two ways a campaign can be unreachable while its page looks entirely healthy — story, totals, donor
+list and a donate button all present, and no wording anywhere that says otherwise:
+
+- **Chuffed, donations closed.** The button still links to the same `/pay/campaign/<uuid>` page. Only
+  its label ("Donations closed") and its `--disabled` class say the campaign is over, so the button
+  is read rather than just followed.
+- **GoFundMe, monthly only.** An organiser can set a fundraiser to take subscriptions and nothing
+  else. `/donate` then redirects back to the campaign, so the checkout this tool fills never appears;
+  the sole tell is that every donate button reads "Donate monthly" instead of "Donate now". A
+  campaign offering *both* is fine and is kept.
+
+Both drop the candidate during `plan` with a reason, and `check` files them under `campaign`. Neither
+is inferred from an unread page: no button text at all means nothing either way, and the gate and
+status checks answer that instead.
+
 ## Setup
 
 ```sh
@@ -198,6 +215,32 @@ reported, so challenges provoked by the crawl's own load do not fill the file.
 The detector is deliberately narrow: these pages talk about "security" and "verification" constantly,
 so only interstitial wording counts, and a 404 is a dead campaign rather than a gate.
 
+### Gates nobody can clear
+
+Two of them are not puzzles: `rate-limited` and `blocked-status`. Chuffed serves the first as an
+ordinary 200 with the donation form replaced by *"We have noticed suspicious activity. Please try
+again later."* — no Cloudflare, no challenge widget, nothing to solve.
+
+Everything else in this list is something a person at the keyboard can get past, so the assisted flow
+says "clear it and we'll carry on" and waits. Doing that here spent the donor's **entire** timeout —
+five silent minutes by default — on a form that was never coming, and then blamed the markup for it.
+`isClearable()` separates the two: an unclearable gate is reported at once, the recipient is handed
+back, and it goes in the gate log so `gates` shows how often it is happening.
+
+**Not provoking it in the first place** is the more useful half, and there are two measures:
+
+- `check --deep` no longer opens gated payment pages at all (above) — the single biggest source of
+  payment-page traffic, removed at no cost.
+- Requests are **paced per host**. Concurrency is across the roster, which is fine spread over
+  several sites and is not fine aimed at one: a roster that is mostly Chuffed means `--concurrency 4`
+  is four simultaneous Chuffed requests for the length of the run. `createPacer` keeps a minimum gap
+  (750ms) between *starts* on any one host, so a mixed roster still moves at full speed while a
+  single busy site queues.
+
+What is deliberately **not** done: nothing here tries to look like a different visitor. No fresh
+profiles per request, no proxy or address rotation, no fingerprint spoofing. Being told "come back
+later" is answered by coming back later.
+
 ## Donating is assisted, not unattended
 
 Chuffed puts its payment page behind a Cloudflare Turnstile challenge, GoFundMe's checkout is
@@ -310,13 +353,88 @@ Two things keep the report trustworthy, both learned from the first full run:
   run called 83 perfectly live campaigns "no donate button"; retrying immediately — still under our
   own load — only cleared half of them. Even so, treat the list as *campaigns to look at* rather than
   as proof: a slow page can still slip through both passes.
-- **Chuffed's payment page is reported as inconclusive**, not broken. It sits behind a Cloudflare
-  challenge that never clears headless, so `--deep` cannot learn anything there — and a check that
-  cried wolf every run would be a check nobody reads.
+- **Chuffed's payment page is reported as inconclusive**, not broken — and is no longer opened at
+  all. It sits behind a Cloudflare challenge that never clears headless, so `--deep` could only ever
+  conclude "inconclusive" there, whatever the markup was doing. Opening it anyway was not free: once
+  per campaign across the whole roster is a burst, and Chuffed answers a burst by refusing to serve
+  its payment pages for a while (below). The same conclusion is now reported without going and asking
+  for it.
 
 Every selector lives in one `SELECTORS` object per driver — `src/drivers/chuffed.js` and
 `src/drivers/gofundme.js` — as ordered fallback lists. If a run reports fields under "fill in
 yourself" that it used to fill, that object is the thing to fix.
+
+### GoFundMe has two checkouts, and picks one per campaign
+
+Nothing in the URL, and nothing visible on the page, says which one a campaign gets:
+
+| layout | where the payment section is |
+| --- | --- |
+| `first-party` | all of it in the campaign page, as it always was |
+| `payment-elements` | payment method list, personal and card fields, and the donate button served from `payment-elements.gofundme.com` in iframes |
+
+The amount, tip and anonymity controls stay in the page in both. `paymentSurfaces()` works out which
+you have and returns each part as a *surface* — a page or a frame, either of which the browser
+helpers take — so nothing above it has to care. `findFirstAcross` polls every surface inside one
+deadline rather than giving each its own, which would multiply the wait by the number of frames.
+
+This is worth knowing about because of how it failed: `page.$` does not reach into an iframe, so on
+the newer checkout every card field read as absent — and "field not found" is exactly what a checkout
+that has not rendered yet looks like. There was no error. The run simply filled in the amount and
+handed the whole payment form back to the donor. `check --deep` missed it for the same reason, which
+is why `driver.form` now names the surfaces to search and a `reveal` step to run first (nothing but
+the amount exists until a payment method is chosen, on either checkout).
+
+Two differences on the newer one that cost money rather than time:
+
+- **A "Give once" / "Monthly" toggle.** It opens on "Give once", but being wrong here signs the donor
+  up to a recurring charge, so it is read and set rather than assumed.
+- **No currency control at all** — it charges in the fundraiser's own currency. That is reported as
+  such, and the donation goes on the "check this yourself" list rather than being passed off as a
+  currency the run chose.
+
+### Some Chuffed campaigns take PayPal and nothing else
+
+Their pay page looks entirely normal until section 3, "Payment details", which holds a "Pay via
+PayPal" button and no card element at all. `paymentOffer()` asks which of the two submit buttons the
+page has — `#js-donate-action-stripe` or `#js-donate-action-paypal` — because reaching for the card
+fields regardless is actively misleading: `fillStripeCard` finds nothing, all five card fields land
+under "fill in yourself", and the donor goes looking for inputs that are not on the page.
+
+It cannot be spotted during `plan`. The campaign page says nothing about gateways (its GraphQL was
+checked), and the pay page needs Cloudflare clearance, so the first time a run meets one is always in
+the browser.
+
+When one is found the run presses the PayPal button, follows to PayPal's own checkout — same tab
+here, but a popup is handled too — and fills what it can into the **guest** card form, the one that
+needs no PayPal account. What it does and does not do there:
+
+| | |
+| --- | --- |
+| sets first | the billing **country**, to `US` |
+| fills | email, card number, expiry, CVV, first and last name, postcode |
+| leaves blank | phone, street address, city — the tool does not store them, and a plausible guess on a billing address fails at the bank rather than here |
+| turns off | "create a PayPal account" (left on, paying also opens an account, with a password and date of birth to match) and the marketing opt-in |
+| never touches | "Agree & Pay" |
+
+**The country goes first, and the order is not negotiable.** PayPal picks a country from the
+merchant and the visitor's connection — an Australian charity's checkout opens on Australia — and
+the rest of the form is built around it: which address lines it asks for, how the postcode is
+validated, which dialling code the phone takes. **Changing it empties every other field.** Set after
+the card, it wipes the card straight back out, and nothing reports that: the boxes are simply blank
+again, indistinguishable from fields that were never filled. So `setCountry()` runs before the first
+keystroke, and `test/paypal.test.js` fails if it is moved. A checkout that does not offer `US` is
+left on whatever it had and reported, rather than forced.
+
+**PayPal's fields drop keystrokes.** A live run that sent "Test" left "Te", and "10001" left "1000".
+Nothing raises at the time — a half-typed card number is a decline at the bank a week later. So every
+field is read back after typing, and a short value is **topped up from where it stopped** rather than
+cleared and retyped: clearing was tried first and was strictly worse, turning partly-correct fields
+into empty ones. A field that still will not take is named for the donor rather than left to chance.
+
+Expiry is offered as both `MM/YY` and `MMYY` — bare digits silently stayed empty, the separated form
+took — and the account switch is clicked via its label as well as itself, because clicking the hidden
+input reported success and changed nothing.
 
 Chuffed's payment page cannot be opened without clearing a challenge, so its selectors are read out
 of the site's own `payment.js` bundle (linked from the page source) rather than guessed at, and

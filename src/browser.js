@@ -224,25 +224,47 @@ export function isClosedError(error) {
  *   collapsed wrappers hold real text while measuring zero.
  * @returns {Promise<import('puppeteer').ElementHandle|null>}
  */
-export async function findFirst(frame, selectors, { timeoutMs = 8000, visible = true } = {}) {
+export async function findFirst(frame, selectors, options = {}) {
+  return findFirstAcross([frame], selectors, options);
+}
+
+/**
+ * The same, but looking in several documents at once.
+ *
+ * A checkout is not always one document: GoFundMe's newer one serves its card
+ * fields from an iframe on another origin, and `frame.$` never crosses that
+ * boundary. Every surface is polled inside a *single* deadline rather than
+ * given a timeout each — searching them in turn would multiply the wait by the
+ * number of frames, and all of that time would be spent on documents that
+ * simply are not the one holding the field.
+ *
+ * Surfaces are given in priority order and detached ones are skipped: a frame
+ * that re-rendered mid-search is not an error, it just has nothing to say.
+ *
+ * @param {Array<import('puppeteer').Frame|import('puppeteer').Page>} frames
+ */
+export async function findFirstAcross(frames, selectors, { timeoutMs = 8000, visible = true } = {}) {
   const deadline = Date.now() + timeoutMs;
   do {
-    for (const selector of selectors) {
-      const handle = await frame.$(selector).catch(() => null);
-      if (handle) {
-        if (!visible) return handle;
-        const visibleNow = await handle
-          .evaluate((el) => {
-            const style = globalThis.getComputedStyle(el);
-            return (
-              style.visibility !== 'hidden' &&
-              style.display !== 'none' &&
-              el.getClientRects().length > 0
-            );
-          })
-          .catch(() => false);
-        if (visibleNow) return handle;
-        await handle.dispose();
+    for (const frame of frames) {
+      if (!frame || frame.isDetached?.()) continue;
+      for (const selector of selectors) {
+        const handle = await frame.$(selector).catch(() => null);
+        if (handle) {
+          if (!visible) return handle;
+          const visibleNow = await handle
+            .evaluate((el) => {
+              const style = globalThis.getComputedStyle(el);
+              return (
+                style.visibility !== 'hidden' &&
+                style.display !== 'none' &&
+                el.getClientRects().length > 0
+              );
+            })
+            .catch(() => false);
+          if (visibleNow) return handle;
+          await handle.dispose();
+        }
       }
     }
     await new Promise((resolve) => setTimeout(resolve, 250));

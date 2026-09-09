@@ -23,8 +23,9 @@ import {
 } from '../browser.js';
 import { formatDuration } from '../progress.js';
 import { parseMoney as parseMoneyWithCurrency } from '../money.js';
-import { detectGateOnPage, gateIfBlocking, waitPastGate } from '../gates.js';
+import { detectGateOnPage, gateIfBlocking, isClearable, waitPastGate } from '../gates.js';
 import { fillStripeCard } from './stripe.js';
+import { fillPayPalGuest, findPayPalPage } from './paypal.js';
 
 /**
  * Selectors for the payment page, read out of Chuffed's own `payment.js`
@@ -100,6 +101,17 @@ export const SELECTORS = {
   showName: ['input[name="isShowName"]'],
   submitButton: ['#js-donate-action-stripe', 'button[type="submit"]', 'button[class*="donate" i]'],
   /**
+   * How this page takes money, and the only reliable statement of it.
+   *
+   * Chuffed mounts a Stripe card element and a "Pay with Card" button when the
+   * campaign takes cards, and renders a "Pay via PayPal" button *instead* — no
+   * card element anywhere on the page — when it does not. `submitButton` cannot
+   * tell them apart: its `button[type="submit"]` fallback matches the PayPal
+   * button just as happily.
+   */
+  cardSubmit: ['#js-donate-action-stripe'],
+  paypalSubmit: ['#js-donate-action-paypal', 'button[class*="--paypal"]'],
+  /**
    * Chuffed's optional contribution to itself, which it pre-selects once an
    * amount is entered — $4.00 on a $10 donation, in the captured page. The
    * dropdown offers a few tiers plus "Other"; choosing "Other" reveals a free
@@ -144,6 +156,72 @@ const CLOSED_MARKERS = [
   "doesn't exist",
   'does not exist',
 ];
+
+/**
+ * A campaign that has stopped taking money still renders as a normal campaign
+ * page: the story, the totals and the donate button are all there, the button
+ * still links to the same `/pay/campaign/<uuid>` page, and none of the wording
+ * in CLOSED_MARKERS appears anywhere. The only difference is the button itself
+ * — its label becomes "Donations closed" and its class picks up `--disabled`.
+ *
+ * So the button has to be read, not just followed. Without this the campaign
+ * passes verification, gets ranked, and the run opens a payment page that will
+ * not take the donation.
+ */
+const CLOSED_BUTTON = /donations?\s+(?:are\s+)?closed|closed\s+(?:for|to)\s+donations/i;
+
+/**
+ * Is this donate button telling us the campaign is over?
+ *
+ * @param {object} button as read from the page
+ * @param {string} [button.text]
+ * @param {string} [button.className]
+ * @param {string|null} [button.ariaDisabled]
+ */
+export function donateButtonClosed({ text = '', className = '', ariaDisabled = null } = {}) {
+  if (CLOSED_BUTTON.test(String(text))) return true;
+  if (ariaDisabled === 'true' || ariaDisabled === true) return true;
+  // Chuffed's button component spells its modifiers `--disabled`, `--primary`,
+  // `--bold`. Matched as a whole word so `--not-disabled` could never count.
+  return /(?:^|\s)--disabled(?:\s|$)/.test(String(className));
+}
+
+/**
+ * What this pay page will actually accept.
+ *
+ * Some campaigns are set up to take PayPal and nothing else. The page looks
+ * entirely normal — amount, tip, name, email, the lot — and then section 3,
+ * "Payment details", is empty apart from a "Pay via PayPal" button. There is no
+ * Stripe element on it at all.
+ *
+ * Worth asking before reaching for the card fields, because not asking is
+ * actively misleading: `fillStripeCard` finds nothing, every card field lands
+ * on the "fill in yourself" list, and the donor is sent looking for five inputs
+ * that do not exist on the page in front of them.
+ *
+ * Neither found means "could not tell" — the payment section renders last, and
+ * that is reported as nothing rather than as a refusal.
+ *
+ * @returns {Promise<{card: boolean, paypal: boolean}>}
+ */
+export async function paymentOffer(page, { timeoutMs = 8000 } = {}) {
+  const present = async (selectors) => {
+    const handle = await findFirst(page, selectors, { timeoutMs: 250, visible: false });
+    if (!handle) return false;
+    await handle.dispose();
+    return true;
+  };
+
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const card = await present(SELECTORS.cardSubmit);
+    const paypal = await present(SELECTORS.paypalSubmit);
+    if (card || paypal) return { card, paypal };
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  } while (Date.now() < deadline);
+
+  return { card: false, paypal: false };
+}
 
 /** "$3,439" -> 3439 */
 export function parseMoney(text) {
@@ -199,9 +277,10 @@ const driver = {
     url: (campaignUrl, inspection) => inspection?.payUrl ?? null,
     fields: {
       amount: SELECTORS.amountInput,
-      name: SELECTORS.nameInput,
+      'first name': SELECTORS.firstNameInput,
+      'last name': SELECTORS.lastNameInput,
       email: SELECTORS.emailInput,
-      tip: SELECTORS.tipInput,
+      tip: SELECTORS.tipSelect,
       submit: SELECTORS.submitButton,
     },
   },
@@ -242,12 +321,19 @@ const driver = {
 
       // A challenge is only worth reporting when it is why we cannot read the
       // page — this page carries challenge widgets that have already passed.
-      const payUrl = await readDonateHref(page);
+      const button = await readDonateButton(page);
+      const payUrl = button?.href ?? null;
       if (!payUrl) {
         const gate = await detectGateOnPage(page, { status });
         return gate
           ? { ok: false, gate, note: `bot gate on the campaign page (${gate.kind})` }
           : { ok: false, note: 'no donate button on the campaign page' };
+      }
+
+      // The link works and the page looks alive, but the button says otherwise.
+      if (donateButtonClosed(button)) {
+        const said = button.text || 'the donate button is disabled';
+        return { ok: false, note: `campaign is not taking donations ("${said}")` };
       }
 
       const raised = await readRaised(page);
@@ -335,6 +421,26 @@ const driver = {
     // A gate here is the expected one, and the assisted flow exists for it, so
     // it is reported but never logged as something to investigate.
     const gate = await gateIfBlocking(page, SELECTORS.amountInput, { timeoutMs: 5000 });
+
+    // Chuffed's rate limiter is not a puzzle: it has replaced the form with
+    // "we have noticed suspicious activity, please try again later" and will
+    // keep doing so for a while. Waiting spends the donor's whole timeout —
+    // five silent minutes — on a form that is not coming, and then blames the
+    // markup for it. Say what it is and hand this recipient back now.
+    if (gate && !isClearable(gate)) {
+      log(
+        `  Chuffed is not serving this payment page right now (${gate.marker}) — there is ` +
+          'nothing to clear; it is asking us to come back later',
+      );
+      return {
+        filled: [],
+        manual: ['the whole form (Chuffed is turning us away for now)'],
+        url: page.url(),
+        gate,
+        rateLimited: true,
+      };
+    }
+
     if (gate) {
       log(
         `  Chuffed is showing a ${gate.kind} challenge — clear it in the browser window and ` +
@@ -400,11 +506,28 @@ const driver = {
       if (shown !== null) track(donor.anonymous ? 'anonymous' : 'name shown', shown);
     }
 
+    // Before the card: a PayPal-only campaign has nowhere to put one, and
+    // saying "fill in the card number yourself" about a page with no card
+    // number on it is worse than saying nothing.
+    const offer = await paymentOffer(page);
+    if (offer.paypal && !offer.card) {
+      const result = await payViaPayPal(page, { card, donor, log, timeoutMs });
+      filled.push(...result.filled);
+      manual.push(...result.manual);
+      return {
+        filled,
+        manual,
+        url: result.url ?? page.url(),
+        paymentMethods: offer,
+        viaPayPal: true,
+      };
+    }
+
     const stripe = await fillStripeCard(page, { ...card, postalCode: donor?.postalCode });
     for (const field of stripe.filled) track(`card ${field}`, true);
     for (const field of stripe.missing) track(`card ${field}`, false);
 
-    return { filled, manual, url: page.url() };
+    return { filled, manual, url: page.url(), paymentMethods: offer };
   },
 
   /**
@@ -584,8 +707,48 @@ export async function setTip(page, tip) {
   return charged === want;
 }
 
-async function readDonateHref(page) {
-  // Only the href is read, and the button may be scrolled out of view.
+/**
+ * Hand a PayPal-only campaign over to PayPal, with the card already typed in.
+ *
+ * The Chuffed page is filled in by this point; pressing its one button hands
+ * off to PayPal's own checkout, where the guest form takes a card without a
+ * PayPal account. Everything this tool holds goes in there; the phone number
+ * and street address it does not hold are named for the donor to finish, and
+ * "Agree & Pay" is left for them to press.
+ *
+ * @returns {Promise<{filled: string[], manual: string[], url: string|null}>}
+ */
+async function payViaPayPal(page, { card, donor, log = () => {}, timeoutMs = 300_000 }) {
+  log(
+    '  this campaign takes PayPal only — there is no card form on the Chuffed page, so this ' +
+      'opens PayPal and fills in its guest checkout instead',
+  );
+
+  if (!(await clickFirst(page, SELECTORS.paypalSubmit, { timeoutMs: 8000 }))) {
+    return {
+      filled: [],
+      manual: ['the PayPal handoff (its button would not click)'],
+      url: page.url(),
+    };
+  }
+
+  // Whether this opened a tab or navigated the one we are on is PayPal's
+  // business; either way it is the tab now showing a PayPal URL.
+  const paypal = await findPayPalPage(page.browser(), { timeoutMs: Math.min(timeoutMs, 60_000) });
+  if (!paypal) {
+    return { filled: [], manual: ['the whole PayPal form (it never opened)'], url: page.url() };
+  }
+
+  const result = await fillPayPalGuest(paypal, { card, donor });
+  if (result.note) log(`  ${result.note}`);
+  if (result.ok) {
+    log('  filled in PayPal\'s guest checkout — finish the boxes it still wants, then pay there');
+  }
+  return { filled: result.filled, manual: result.manual, url: paypal.url() };
+}
+
+async function readDonateButton(page) {
+  // The button may be scrolled out of view, so visibility is not required.
   //
   // The wait is long because the consequence of giving up early is dropping a
   // real person: the button is rendered by the page's own JavaScript, usually
@@ -598,11 +761,24 @@ async function readDonateHref(page) {
   });
   if (!handle) return null;
   try {
-    const href = await handle.evaluate((el) => el.getAttribute('href'));
-    return href ? new URL(href, page.url()).toString() : null;
+    const button = await handle.evaluate((el) => ({
+      href: el.getAttribute('href'),
+      text: el.textContent?.trim() ?? '',
+      className: el.getAttribute('class') ?? '',
+      ariaDisabled: el.getAttribute('aria-disabled'),
+    }));
+    return {
+      ...button,
+      href: button.href ? new URL(button.href, page.url()).toString() : null,
+    };
   } finally {
     await handle.dispose();
   }
+}
+
+/** Just the link, for the steps that only need somewhere to go. */
+async function readDonateHref(page) {
+  return (await readDonateButton(page))?.href ?? null;
 }
 
 /**

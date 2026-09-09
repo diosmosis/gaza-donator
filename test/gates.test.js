@@ -10,7 +10,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { GateLog, detectGate, summariseGates } from '../src/gates.js';
+import { readFileSync } from 'node:fs';
+import { GateLog, detectGate, isClearable, summariseGates } from '../src/gates.js';
 
 const tempFile = () =>
   path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-gates-')), 'gates.jsonl');
@@ -133,4 +134,33 @@ test('the same page seen twice is one group with one example', () => {
 
   assert.equal(groups[0].count, 2);
   assert.deepEqual(groups[0].examples, ['a']);
+});
+
+test('Chuffed turning us away is a gate, and not one a person can clear', () => {
+  // Captured from a real pay page. Chuffed serves this as an ordinary 200 with
+  // the donation form replaced by one sentence — no Cloudflare, no challenge
+  // widget, nothing to solve. Before it was recognised the run waited out the
+  // donor's entire five-minute timeout for a form that was never coming, then
+  // blamed the markup and wrote nothing to the gate log.
+  const html = readFileSync(new URL('./fixtures/chuffed-suspicious.html', import.meta.url), 'utf8');
+  const text = html
+    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ');
+
+  const gate = detectGate({ status: 200, text, title: 'Payment | Chuffed' });
+
+  assert.equal(gate?.kind, 'rate-limited');
+  assert.equal(isClearable(gate), false, 'nobody can click their way past a rate limiter');
+});
+
+test('a challenge someone can actually solve is still worth waiting for', () => {
+  // The distinction has to hold in both directions, or the assisted flow stops
+  // waiting on the Turnstile it was built around.
+  assert.equal(isClearable(detectGate({ text: 'Verify you are human' })), true);
+  assert.equal(isClearable(detectGate({ frameUrls: ['https://challenges.cloudflare.com/x'] })), true);
+
+  // A hard block is not solvable either.
+  assert.equal(isClearable(detectGate({ status: 429 })), false);
+  assert.equal(isClearable(null), false, 'no gate is not a clearable gate');
 });

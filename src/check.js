@@ -10,7 +10,8 @@
  * charge money — it reads pages.
  */
 import { driverFor } from './drivers/index.js';
-import { findFirst } from './browser.js';
+import { findFirstAcross } from './browser.js';
+import { createPacer } from './pace.js';
 
 /** What a problem is about, which decides who has to act on it. */
 export const KIND = {
@@ -35,7 +36,7 @@ export const KIND = {
  */
 export async function checkCampaign(
   candidate,
-  { browser, convert = null, deep = false, resolveDriver = driverFor },
+  { browser, convert = null, deep = false, resolveDriver = driverFor, pace = async () => 0 },
 ) {
   const result = {
     fqn: candidate.fqn,
@@ -56,6 +57,7 @@ export async function checkCampaign(
 
   let inspection;
   try {
+    await pace(candidate.campaignUrl);
     inspection = await browser.withPage((page) => driver.inspect(page, candidate.campaignUrl));
   } catch (err) {
     problem(KIND.CAMPAIGN, `could not open the campaign page: ${err.message}`);
@@ -100,7 +102,13 @@ export async function checkCampaign(
   }
 
   if (deep && driver.form) {
-    await checkForm(result, { driver, browser, campaignUrl: candidate.campaignUrl, inspection });
+    await checkForm(result, {
+      driver,
+      browser,
+      campaignUrl: candidate.campaignUrl,
+      inspection,
+      pace,
+    });
   }
 
   return finish(result);
@@ -112,24 +120,69 @@ export async function checkCampaign(
  * This is the check that matters most — the payment selectors are the ones that
  * cost money when they rot — but it is only conclusive where the page renders
  * without a human. On a gated platform, nothing found means "could not look".
+ *
+ * Two things a driver may need before its form can be read, both optional:
+ * `reveal` puts the page into the state where the fields exist at all (nothing
+ * but the amount renders until a payment method is chosen), and `surfaces`
+ * names the documents to search, because a checkout is not always one page —
+ * GoFundMe serves its newer one from iframes on another origin.
  */
-async function checkForm(result, { driver, browser, campaignUrl, inspection }) {
+async function checkForm(result, { driver, browser, campaignUrl, inspection, pace = async () => 0 }) {
   const url = driver.form.url(campaignUrl, inspection);
   if (!url) {
     result.problems.push({ kind: KIND.PARSE, message: 'no payment page to check' });
     return;
   }
 
+  // A gated payment page is not opened at all.
+  //
+  // Opening it could never teach us anything: it sits behind a challenge that
+  // does not clear without a person, so every field reads as missing and the
+  // answer is "inconclusive" whatever the markup is doing. That was already
+  // true — this used to load the page and then conclude exactly that.
+  //
+  // It was not a free nothing, though. It runs once per campaign across the
+  // whole roster, and Chuffed answers a burst of that by refusing to serve its
+  // payment pages for a while: "we have noticed suspicious activity, please
+  // try again later", on the very pages the donation step needs. A diagnostic
+  // is not worth spending the ability to donate on, so the same conclusion is
+  // reported without going and asking for it.
+  if (driver.form.gated) {
+    result.details.formUrl = url;
+    result.inconclusive.push(
+      'payment form is behind a challenge that needs a person; it was not opened',
+    );
+    return;
+  }
+
   const entries = Object.entries(driver.form.fields);
+
+  // A descriptor naming a selector group that does not exist is a typo in this
+  // repo, not a finding about the campaign — and left to reach `findFirst` it
+  // throws, which the caller reports as "could not open the payment page" and
+  // so hides the real cause behind a plausible lie about the site.
+  const undefined_ = entries.filter(([, selectors]) => !Array.isArray(selectors));
+  if (undefined_.length > 0) {
+    result.problems.push({
+      kind: KIND.PARSE,
+      message: `no selectors defined for: ${undefined_.map(([label]) => label).join(', ')}`,
+    });
+    return;
+  }
+
   let found;
   try {
+    await pace(url);
     found = await browser.withPage(async (page) => {
       await page.goto(url, { waitUntil: 'domcontentloaded' });
       await page.waitForNetworkIdle({ idleTime: 1000, timeout: 25_000 }).catch(() => {});
 
+      if (driver.form.reveal) await driver.form.reveal(page).catch(() => {});
+      const surfaces = driver.form.surfaces ? await driver.form.surfaces(page) : [page];
+
       const present = [];
       for (const [label, selectors] of entries) {
-        const handle = await findFirst(page, selectors, { timeoutMs: 3000, visible: false });
+        const handle = await findFirstAcross(surfaces, selectors, { timeoutMs: 3000, visible: false });
         if (handle) {
           present.push(label);
           await handle.dispose();
@@ -148,13 +201,6 @@ async function checkForm(result, { driver, browser, campaignUrl, inspection }) {
   result.details.formMissing = missing;
 
   if (missing.length === 0) return;
-
-  if (driver.form.gated && found.length === 0) {
-    result.inconclusive.push(
-      'payment form did not render (bot protection); its selectors were not checked',
-    );
-    return;
-  }
 
   result.problems.push({
     kind: KIND.PARSE,
@@ -181,6 +227,7 @@ function finish(result) {
  * @param {object[]} options.candidates
  * @param {import('./browser.js').BrowserSession} options.browser
  * @param {number} [options.concurrency]
+ * @param {number} [options.minGapMs] least time between two requests to one host
  * @param {boolean} [options.retryFailures]
  * @param {(result: object, index: number) => void} [options.onResult] progress hook
  * @param {(count: number) => void} [options.onRecheck] called before the second pass
@@ -196,10 +243,14 @@ export async function checkCampaigns({
   resolveDriver = driverFor,
   retryFailures = true,
   gateLog = null,
+  minGapMs = 750,
   onResult = () => {},
   onRecheck = () => {},
   pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) {
+  // Concurrency is across the roster; this is per site. A roster that is mostly
+  // one platform would otherwise point the whole pool at it at once.
+  const pace = createPacer({ minGapMs });
   const recordGate = (result) => {
     if (!gateLog || !result?.gate) return;
     gateLog.record({
@@ -214,7 +265,7 @@ export async function checkCampaigns({
 
   const once = async (candidate) => {
     try {
-      return await checkCampaign(candidate, { browser, convert, deep, resolveDriver });
+      return await checkCampaign(candidate, { browser, convert, deep, resolveDriver, pace });
     } catch (err) {
       // A check that throws is itself a finding, not a reason to lose the run.
       return {

@@ -11,13 +11,18 @@
  *   - The card fields only render once the "credit card" payment method is
  *     selected.
  *
- * Selectors observed on the live site (2026-08); see README if they rot.
+ * There are currently *two* checkouts, and which one a campaign gets is decided
+ * by GoFundMe, not by anything in the URL — see `paymentSurfaces`.
+ *
+ * Selectors observed on the live site (2026-08, second checkout 2026-09); see
+ * README if they rot.
  */
 import {
   clickDeepMatching,
   clickFirst,
   clickMatching,
   findFirst,
+  findFirstAcross,
   pageText,
   readText,
   readValue,
@@ -25,7 +30,7 @@ import {
   typeInto,
 } from '../browser.js';
 import { parseMoney } from '../money.js';
-import { detectGateOnPage, gateIfBlocking, waitPastGate } from '../gates.js';
+import { detectGateOnPage, gateIfBlocking, isClearable, waitPastGate } from '../gates.js';
 import { waitForThanks } from './chuffed.js';
 
 export const SELECTORS = {
@@ -38,19 +43,52 @@ export const SELECTORS = {
   tipSlider: ['input[type="range"][aria-label="Tip amount"]', 'input[type="range"][aria-label*="tip" i]'],
   customTipButton: ['button.hrt-text-button', 'button[class*="text-button"]'],
   customTipInput: ['input[name*="tip" i]', 'input[id*="tip" i][type="text"]'],
-  cardRadio: ['input#add-card', 'input[name="paymentMethod"][value="CREDIT_CARD"]'],
+  /**
+   * "Give once" against "Monthly". Only the payment-elements checkout has it,
+   * and it decides whether the card is charged once or every month.
+   */
+  giveOnceTab: ['[data-tracking-id="Checkout: Choose one time donation"]'],
+  cardRadio: [
+    'input#add-card',
+    '[data-testid="payment-method-radio-CREDIT_CARD"]',
+    'input[name="paymentMethod"][value="CREDIT_CARD"]',
+  ],
   cardNumber: ['input#card-number', 'input[name="card.number"]'],
   cardExpiry: ['input#card-expiration', 'input[name="card.expirationDate"]'],
-  cardCvv: ['input#card-cvv', 'input[name="card.CVV"]'],
-  cardName: ['input#card-name', 'input[name="card.name"]'],
-  email: ['input#email-address', 'input[name="email"]'],
-  firstName: ['input#first-name', 'input[name="firstName"]'],
-  lastName: ['input#last-name', 'input[name="lastName"]'],
-  postalCode: ['input#location-postal-code', 'input[name="postalCode"]'],
+  // The payment-elements markup spells this one `card.cvv`; the id is shared.
+  cardCvv: ['input#card-cvv', 'input[name="card.cvv"]', 'input[name="card.CVV"]'],
+  cardName: [
+    'input#card-name',
+    'input[name="card.name"]',
+    'input[name="cardHolderName"]',
+    '[data-testid="cardHolderName"]',
+  ],
+  email: ['input#email-address', 'input[name="email"]', '[data-testid="email"]'],
+  firstName: ['input#first-name', 'input[name="firstName"]', '[data-testid="firstName"]'],
+  lastName: ['input#last-name', 'input[name="lastName"]', '[data-testid="lastName"]'],
+  postalCode: [
+    'input#location-postal-code',
+    'input[name="postalCode"]',
+    '[data-testid="postalCode"]',
+  ],
   anonymous: ['input#checkout-optional-anonymous', 'input[name="checkoutPersonalAnonymous"]'],
   saveCard: ['input#save-card', 'input[name="saveCard"]'],
-  submitButton: ['button#donate-now', 'button[type="submit"][aria-label*="Donate" i]'],
+  submitButton: [
+    'button#donate-now',
+    '[data-testid="card-checkout-submit-button"]',
+    'button[type="submit"][aria-label*="Donate" i]',
+  ],
   raised: ['[data-testid="progress-meter-heading"]', 'h2[class*="progress"]', '.progress-meter_progressMeterHeading__Nb7lL'],
+  /**
+   * The donate call-to-action on the *campaign* page — not the checkout's own
+   * submit button. Its wording is the only thing that says whether this
+   * campaign takes a one-off donation; see `takesOneOffDonations`.
+   */
+  campaignDonateButton: [
+    'a[class*="donate-button_donateButton"]',
+    'a[href*="/donate?"]',
+    'a[href$="/donate"]',
+  ],
   /**
    * The privacy strip GoFundMe floats over the bottom of the page. It sits on
    * top of the checkout and swallows clicks meant for the form underneath.
@@ -86,6 +124,36 @@ export const PRIVACY_CHOICES = [
   /^\s*(?:necessary|essential) (?:cookies )?only\s*$/i,
   /^\s*opt[- ]?out\s*$/i,
 ];
+
+/**
+ * Wording GoFundMe uses for a button that starts a subscription rather than a
+ * single donation.
+ */
+const RECURRING_ONLY = /\b(?:monthly|recurring|per month|subscribe|subscription)\b/i;
+
+/**
+ * Does this campaign take a one-off donation?
+ *
+ * An organiser can set a fundraiser to collect monthly subscriptions only, and
+ * the page says so nowhere in words: the story, the totals and the donor list
+ * all read as normal, `/donate` quietly redirects back to the campaign so the
+ * checkout never appears, and the single difference is that every donate
+ * button reads "Donate monthly" instead of "Donate now". Undetected, the
+ * candidate is ranked and picked, and the run opens a browser onto a form that
+ * does not exist.
+ *
+ * A campaign offering both is fine — only the ones offering nothing else are
+ * dropped. Reading no labels at all says nothing (the page never rendered, or
+ * the markup moved), so it is not treated as a refusal; the gate and status
+ * checks are what speak to that.
+ *
+ * @param {string[]} labels the text of every donate call-to-action on the page
+ */
+export function takesOneOffDonations(labels) {
+  const found = (labels ?? []).map((label) => String(label).trim()).filter(Boolean);
+  if (found.length === 0) return true;
+  return !found.every((label) => RECURRING_ONLY.test(label));
+}
 
 const CLOSED_MARKERS = [
   'fundraiser is no longer accepting donations',
@@ -147,6 +215,103 @@ export function splitName(name) {
   return { firstName: parts[0], lastName: parts.slice(1).join(' ') };
 }
 
+/**
+ * The frames GoFundMe's newer checkout serves its payment section from. They
+ * are on a different origin from the campaign page, which is the whole reason
+ * they have to be named: nothing on the outer page reaches into them.
+ */
+const PAYMENT_ELEMENT_FRAMES = {
+  fields: /payment-elements\.gofundme\.com\/v1\/checkout-payment-methods/i,
+  submit: /payment-elements\.gofundme\.com\/v1\/checkout-submit-button/i,
+};
+
+/** The first live frame whose URL matches, or null. */
+function frameMatching(page, pattern) {
+  return page.frames().find((frame) => !frame.isDetached() && pattern.test(frame.url())) ?? null;
+}
+
+/**
+ * Work out where each part of this checkout actually lives.
+ *
+ * GoFundMe is midway through replacing its checkout and decides per campaign
+ * which one you get — there is nothing in the URL, and nothing visible on the
+ * page, that says which:
+ *
+ *   first-party      the checkout this driver was written against. Amount,
+ *                    payment methods, card fields and the donate button are all
+ *                    in the campaign page itself.
+ *   payment-elements the newer one. The amount, tip and anonymity controls stay
+ *                    on the page, but the payment method list, every personal
+ *                    and card field, and the donate button are served from
+ *                    payment-elements.gofundme.com in iframes.
+ *
+ * `page.$` does not cross into an iframe, so on the newer checkout every card
+ * field read as absent and the run quietly handed the entire form back to the
+ * donor to type in themselves — no error, because "field not found" is exactly
+ * what this driver expects on a checkout that has not rendered yet.
+ *
+ * Both layouts are returned as *surfaces* — a page or a frame, either of which
+ * the browser helpers take — so the filling code does not have to know which it
+ * was given.
+ *
+ * @returns {Promise<{layout: string, fields: object, submit: object}>}
+ */
+export async function paymentSurfaces(page, { timeoutMs = 20_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const fields = frameMatching(page, PAYMENT_ELEMENT_FRAMES.fields);
+    if (fields) {
+      return {
+        layout: 'payment-elements',
+        fields,
+        // The submit button has a frame of its own and is slower to arrive;
+        // falling back to the page keeps this from being the thing that fails.
+        submit: frameMatching(page, PAYMENT_ELEMENT_FRAMES.submit) ?? page,
+      };
+    }
+
+    // No payment frame: either the old checkout, or the new one still loading.
+    // Its own payment method list is what tells those apart.
+    const radio = await findFirst(page, SELECTORS.cardRadio, { timeoutMs: 400, visible: false });
+    if (radio) {
+      await radio.dispose();
+      return { layout: 'first-party', fields: page, submit: page };
+    }
+  } while (Date.now() < deadline);
+
+  // Nothing recognisable. The page is still the best guess, and the caller
+  // reports each field it could not fill anyway.
+  return { layout: 'unknown', fields: page, submit: page };
+}
+
+/**
+ * Make sure the checkout is set to donate once rather than every month.
+ *
+ * Only the newer checkout has the choice, and it normally opens on "Give once"
+ * — but "normally" is not good enough when being wrong means signing the donor
+ * up to a recurring charge, so it is read and, if need be, set.
+ *
+ * @returns {Promise<{present: boolean, acted: boolean, ok: boolean}>}
+ */
+export async function setGiveOnce(page) {
+  const tab = await findFirst(page, SELECTORS.giveOnceTab, { timeoutMs: 4000, visible: false });
+  if (!tab) return { present: false, acted: false, ok: true };
+
+  const selected = (handle) =>
+    handle.evaluate((el) => el.getAttribute('aria-selected') === 'true').catch(() => false);
+
+  try {
+    if (await selected(tab)) return { present: true, acted: false, ok: true };
+    await tab.click();
+    await settle(800);
+    return { present: true, acted: true, ok: await selected(tab) };
+  } catch {
+    return { present: true, acted: true, ok: false };
+  } finally {
+    await tab.dispose();
+  }
+}
+
 const driver = {
   id: 'gofundme',
   label: 'GoFundMe',
@@ -162,6 +327,29 @@ const driver = {
   form: {
     gated: false,
     url: (campaignUrl) => donateUrl(campaignUrl),
+
+    /**
+     * Every document the controls below can be in. Without this the check only
+     * ever looks at the campaign page, so every campaign on the newer checkout
+     * reports its payment fields as missing — which is precisely the breakage
+     * this check exists to catch, misfiled as a rotted selector.
+     */
+    surfaces: async (page) => {
+      const { fields, submit } = await paymentSurfaces(page);
+      return [...new Set([page, fields, submit])];
+    },
+
+    /**
+     * Nothing but the amount exists until a payment method is chosen — on both
+     * checkouts. Checking before that would report the whole form as missing.
+     */
+    reveal: async (page) => {
+      const { fields } = await paymentSurfaces(page);
+      if (!(await clickFirst(fields, SELECTORS.cardRadio, { timeoutMs: 8000 }))) return;
+      await page.waitForNetworkIdle({ idleTime: 600, timeout: 15_000 }).catch(() => {});
+      await settle();
+    },
+
     fields: {
       amount: SELECTORS.amountInput,
       'tip slider': SELECTORS.tipSlider,
@@ -169,6 +357,10 @@ const driver = {
       email: SELECTORS.email,
       'first name': SELECTORS.firstName,
       'last name': SELECTORS.lastName,
+      'card number': SELECTORS.cardNumber,
+      'card expiry': SELECTORS.cardExpiry,
+      'card cvv': SELECTORS.cardCvv,
+      'card name': SELECTORS.cardName,
       submit: SELECTORS.submitButton,
     },
   },
@@ -192,6 +384,14 @@ const driver = {
       if (gate) return { ok: false, gate, note: `bot gate on the campaign page (${gate.kind})` };
       if (status >= 400) return { ok: false, note: `campaign page returned HTTP ${status}` };
     }
+
+    // Only once the page is known to have rendered: an empty button list on a
+    // page we never really loaded would mean nothing either way.
+    const ctas = await readDonateLabels(page);
+    if (!takesOneOffDonations(ctas)) {
+      return { ok: false, note: `campaign only takes monthly donations ("${ctas[0]}")` };
+    }
+
     return {
       ok: true,
       raisedTotal: raised?.amount ?? null,
@@ -224,6 +424,23 @@ const driver = {
     // form that is about to appear — but ask only when the checkout is really
     // missing, not merely because a challenge widget is on the page.
     const gate = await gateIfBlocking(page, SELECTORS.amountInput, { timeoutMs: 5000 });
+
+    // Nothing for a person to clear — the site is declining to serve us for
+    // now. Reported at once rather than waited out.
+    if (gate && !isClearable(gate)) {
+      log(
+        `  GoFundMe is not serving this checkout right now (${gate.marker}) — there is nothing ` +
+          'to clear; it is asking us to come back later',
+      );
+      return {
+        filled: [],
+        manual: ['the whole form (GoFundMe is turning us away for now)'],
+        url: page.url(),
+        gate,
+        rateLimited: true,
+      };
+    }
+
     if (gate) {
       log(
         `  GoFundMe is showing a ${gate.kind} challenge — clear it in the browser window and ` +
@@ -263,35 +480,50 @@ const driver = {
     const manual = [];
     const track = (label, ok) => (ok ? filled : manual).push(label);
 
-    // Choose the payment method first: revealing the card fields re-renders the
-    // form, and anything typed before that can be wiped or lost mid-keystroke.
-    await clickFirst(page, SELECTORS.cardRadio, { timeoutMs: 8000 });
+    // Which checkout did this campaign get? Everything below depends on it, and
+    // the answer is different from one campaign to the next.
+    let { layout, fields } = await paymentSurfaces(page);
+
+    // Before anything else, and before the payment methods in particular: the
+    // once/monthly choice re-renders the list, and the one mistake that cannot
+    // be undone by the donor noticing is a monthly subscription.
+    const once = await setGiveOnce(page);
+    if (once.acted) track('switched to a one-off donation', once.ok);
+
+    // Then the payment method: revealing the card fields re-renders the form,
+    // and anything typed before that can be wiped or lost mid-keystroke.
+    await clickFirst(fields, SELECTORS.cardRadio, { timeoutMs: 8000 });
     await page.waitForNetworkIdle({ idleTime: 600, timeout: 15_000 }).catch(() => {});
     await settle();
 
+    // Re-read them afterwards: choosing a method can replace the payment frame
+    // outright, and a detached frame answers every question with "not found".
+    ({ layout, fields } = await paymentSurfaces(page, { timeoutMs: 10_000 }));
+
     // Before the amount: switching currency re-renders the field and clears it,
     // and an amount typed into the wrong currency is the wrong donation.
-    const currencyResult = await setCurrency(page, currency);
+    const currencyResult = await setCurrency(page, currency, { layout });
     track(currencyLabel(currencyResult, currency), currencyResult.ok);
 
     track('amount', await typeInto(page, SELECTORS.amountInput, String(amount), { timeoutMs: 15_000 }));
     track(tipLabel(tip), await setTip(page, tip));
 
     const { firstName, lastName } = splitName(donor?.name ?? card.name);
-    if (donor?.email) track('email', await typeInto(page, SELECTORS.email, donor.email, { timeoutMs: 5000 }));
-    track('first name', await typeInto(page, SELECTORS.firstName, firstName, { timeoutMs: 5000 }));
-    track('last name', await typeInto(page, SELECTORS.lastName, lastName, { timeoutMs: 5000 }));
+    if (donor?.email) track('email', await typeInto(fields, SELECTORS.email, donor.email, { timeoutMs: 5000 }));
+    track('first name', await typeInto(fields, SELECTORS.firstName, firstName, { timeoutMs: 5000 }));
+    track('last name', await typeInto(fields, SELECTORS.lastName, lastName, { timeoutMs: 5000 }));
 
-    track('card number', await typeInto(page, SELECTORS.cardNumber, card.number.replace(/\D/g, ''), { timeoutMs: 10_000 }));
-    track('card expiry', await typeInto(page, SELECTORS.cardExpiry, formatExpiry(card), { timeoutMs: 5000 }));
-    track('card cvv', await typeInto(page, SELECTORS.cardCvv, String(card.cvc), { timeoutMs: 5000 }));
-    track('card name', await typeInto(page, SELECTORS.cardName, card.name, { timeoutMs: 5000 }));
+    track('card number', await typeInto(fields, SELECTORS.cardNumber, card.number.replace(/\D/g, ''), { timeoutMs: 10_000 }));
+    track('card expiry', await typeInto(fields, SELECTORS.cardExpiry, formatExpiry(card), { timeoutMs: 5000 }));
+    track('card cvv', await typeInto(fields, SELECTORS.cardCvv, String(card.cvc), { timeoutMs: 5000 }));
+    track('card name', await typeInto(fields, SELECTORS.cardName, card.name, { timeoutMs: 5000 }));
     if (donor?.postalCode) {
-      track('postal code', await typeInto(page, SELECTORS.postalCode, donor.postalCode, { timeoutMs: 5000 }));
+      track('postal code', await typeInto(fields, SELECTORS.postalCode, donor.postalCode, { timeoutMs: 5000 }));
     }
 
     // Never let the site keep the card on file.
-    await setCheckbox(page, SELECTORS.saveCard, false);
+    await setCheckbox(fields, SELECTORS.saveCard, false);
+    // Still on the page itself in both checkouts, unlike everything above.
     if (donor?.anonymous) track('anonymous', await setCheckbox(page, SELECTORS.anonymous, true));
 
     // A re-render partway through can drop the amount, and an unnoticed wrong
@@ -307,7 +539,7 @@ const driver = {
       }
     }
 
-    return { filled, manual, url: page.url() };
+    return { filled, manual, url: page.url(), layout };
   },
 
   async waitForConfirmation(page, { timeoutMs, log = () => {} }) {
@@ -337,14 +569,29 @@ const driver = {
  * page set to EUR donates €10, not $10, so this runs before the amount and its
  * result is reported either way.
  *
+ * The payment-elements checkout offers no choice at all: it charges in the
+ * fundraiser's own currency. That is not a rotted selector and saying so would
+ * send whoever reads the run looking for one, so it is named for what it is —
+ * still on the "check this yourself" list, because the donation is then not in
+ * the currency the config asked for.
+ *
  * @returns {Promise<{ok: boolean, from: string|null, note?: string}>}
  */
-export async function setCurrency(page, currency) {
+export async function setCurrency(page, currency, { layout = null } = {}) {
   const want = String(currency ?? '').toUpperCase();
   if (!want) return { ok: true, from: null };
 
   const current = (await readText(page, SELECTORS.currencyButton, { timeoutMs: 6000 }))?.trim();
-  if (!current) return { ok: false, from: null, note: 'no currency control on the page' };
+  if (!current) {
+    return {
+      ok: false,
+      from: null,
+      note:
+        layout === 'payment-elements'
+          ? "this checkout has no currency choice — it charges in the fundraiser's own currency"
+          : 'no currency control on the page',
+    };
+  }
   if (current.toUpperCase().startsWith(want)) return { ok: true, from: current };
 
   if (!(await clickFirst(page, SELECTORS.currencyButton, { timeoutMs: 5000 }))) {
@@ -414,6 +661,24 @@ export async function dismissPrivacyBanner(page) {
   const clicked = await clickDeepMatching(page, PRIVACY_CHOICES);
   if (clicked) await settle(700);
   return { present: true, clicked };
+}
+
+/**
+ * The text of every donate call-to-action on the campaign page.
+ *
+ * All of them, not the first: a campaign that offers both one-off and monthly
+ * giving renders both buttons, and finding "Donate monthly" first would drop
+ * somebody who can be donated to perfectly well.
+ */
+export async function readDonateLabels(page) {
+  const selector = SELECTORS.campaignDonateButton.join(', ');
+  return page
+    .evaluate(
+      (query) =>
+        [...document.querySelectorAll(query)].map((el) => el.textContent?.trim() ?? ''),
+      selector,
+    )
+    .catch(() => []);
 }
 
 /** What the tip step is called in the "filled" / "fill in yourself" lists. */

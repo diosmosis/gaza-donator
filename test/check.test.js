@@ -129,14 +129,20 @@ test('missing payment controls are reported where the form renders', async () =>
   assert.match(result.problems[0].message, /payment form is missing: submit/);
 });
 
-test('a gated form that renders nothing is inconclusive, not a broken selector', async () => {
-  // Chuffed's payment page never clears its challenge headless; reporting that
-  // as rotted selectors every run would train the reader to ignore the report.
+test('a gated payment page is reported inconclusive without being opened', async () => {
+  // It could never say anything else: the challenge does not clear headless, so
+  // every field reads as missing whatever the markup is doing. Opening it was
+  // not free, though — once per campaign across the whole roster is the burst
+  // that gets Chuffed refusing to serve its payment pages at all.
   const form = { gated: true, url: () => 'https://pay/x', fields: { amount: ['#a'], submit: ['#b'] } };
+  const opened = [];
   const browser = {
     async withPage(fn) {
       return fn({
-        goto: async () => ({ status: () => 200 }),
+        goto: async (url) => {
+          opened.push(url);
+          return { status: () => 200 };
+        },
         waitForNetworkIdle: async () => {},
         $: async () => null,
       });
@@ -150,7 +156,36 @@ test('a gated form that renders nothing is inconclusive, not a broken selector',
   });
 
   assert.equal(result.ok, true, 'nothing was learned, so nothing is claimed');
-  assert.match(result.inconclusive[0], /bot protection/);
+  assert.match(result.inconclusive[0], /needs a person/);
+  assert.equal(result.details.formUrl, 'https://pay/x', 'still says which page it means');
+  assert.ok(!opened.includes('https://pay/x'), 'the payment page was left alone');
+});
+
+test('every page the check does open is paced', async () => {
+  // Concurrency is across the roster; pacing is per site. Without it a roster
+  // that is mostly one platform points the whole pool at that platform.
+  const form = { gated: false, url: () => 'https://pay/x', fields: { amount: ['#a'] } };
+  const paced = [];
+
+  await checkCampaign(candidate(), {
+    browser: {
+      async withPage(fn) {
+        return fn({
+          goto: async () => ({ status: () => 200 }),
+          waitForNetworkIdle: async () => {},
+          $: async () => ({ dispose: async () => {} }),
+        });
+      },
+    },
+    deep: true,
+    resolveDriver: driverReturning(GOOD, form),
+    pace: async (url) => {
+      paced.push(url);
+      return 0;
+    },
+  });
+
+  assert.deepEqual(paced, ['https://www.chuffed.org/project/x', 'https://pay/x']);
 });
 
 test('an unsupported platform is reported rather than skipped silently', async () => {

@@ -7,11 +7,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import chuffed, {
   currencyFromGraphql,
+  donateButtonClosed,
   parseMoney,
   tipLabel as chuffedTipLabel,
 } from '../src/drivers/chuffed.js';
 import gofundme, {
   donateUrl,
+  takesOneOffDonations,
   formatExpiry,
   parseAmount,
   parseRaised,
@@ -129,4 +131,79 @@ test('splitName fills both GoFundMe name fields', () => {
   assert.deepEqual(splitName('Jean Luc  Picard'), { firstName: 'Jean', lastName: 'Luc Picard' });
   assert.deepEqual(splitName('Prince'), { firstName: 'Prince', lastName: 'Prince' });
   assert.deepEqual(splitName(''), { firstName: '', lastName: '' });
+});
+
+test('a Chuffed campaign that stopped taking donations is spotted by its button', () => {
+  // Everything else about a closed campaign reads as live — the story, the
+  // totals, and a donate button still linking to a real /pay/campaign page —
+  // so these three signals are all there is to go on.
+  assert.equal(
+    donateButtonClosed({
+      text: 'Donations closed',
+      className: 'link-button campaign-container__donate-button --bold --disabled --primary',
+    }),
+    true,
+  );
+  assert.equal(donateButtonClosed({ text: 'Donations Closed' }), true);
+  assert.equal(donateButtonClosed({ text: 'Closed for donations' }), true);
+  assert.equal(donateButtonClosed({ text: 'Donate now', className: 'x --disabled' }), true);
+  assert.equal(donateButtonClosed({ text: 'Donate now', ariaDisabled: 'true' }), true);
+
+  assert.equal(
+    donateButtonClosed({
+      text: 'Donate now',
+      className: 'link-button campaign-container__donate-button --bold --primary --largev2',
+    }),
+    false,
+  );
+  assert.equal(donateButtonClosed({}), false);
+  assert.equal(donateButtonClosed(), false);
+});
+
+test('a GoFundMe campaign offering only monthly giving is not donatable', () => {
+  // "Donate monthly" on every button is the only thing the page says about it;
+  // /donate redirects back to the campaign rather than opening a checkout.
+  assert.equal(takesOneOffDonations(['Donate monthly']), false);
+  assert.equal(takesOneOffDonations(['Donate monthly', 'Donate monthly', '  ']), false);
+  assert.equal(takesOneOffDonations(['Subscribe']), false);
+
+  // One-off giving offered anywhere on the page is enough.
+  assert.equal(takesOneOffDonations(['Donate now']), true);
+  assert.equal(takesOneOffDonations(['Donate now', 'Donate monthly']), true);
+  assert.equal(takesOneOffDonations(['Donate']), true);
+
+  // Nothing read is not a refusal: the page may simply not have rendered.
+  assert.equal(takesOneOffDonations([]), true);
+  assert.equal(takesOneOffDonations(['', '   ']), true);
+  assert.equal(takesOneOffDonations(undefined), true);
+});
+
+test('a Chuffed page that takes PayPal only is told apart from one that takes cards', async () => {
+  // The page looks entirely normal until section 3, which holds a "Pay via
+  // PayPal" button and no card element at all. Reaching for the card fields
+  // anyway puts five of them on the "fill in yourself" list, which sends the
+  // donor looking for inputs that are not on the page.
+  const { paymentOffer, SELECTORS } = await import('../src/drivers/chuffed.js');
+  const pageWith = (selectors) => ({
+    async $(selector) {
+      return selectors.includes(selector) ? { selector, dispose: async () => {} } : null;
+    },
+  });
+
+  assert.deepEqual(
+    await paymentOffer(pageWith(SELECTORS.paypalSubmit)),
+    { card: false, paypal: true },
+  );
+  assert.deepEqual(
+    await paymentOffer(pageWith(SELECTORS.cardSubmit)),
+    { card: true, paypal: false },
+  );
+  assert.deepEqual(
+    await paymentOffer(pageWith([...SELECTORS.cardSubmit, ...SELECTORS.paypalSubmit])),
+    { card: true, paypal: true },
+  );
+
+  // Neither is "could not tell", not "refuses cards": the payment section is
+  // the last thing this page renders, and the caller falls back to trying.
+  assert.deepEqual(await paymentOffer(pageWith([]), { timeoutMs: 400 }), { card: false, paypal: false });
 });

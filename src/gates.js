@@ -51,7 +51,32 @@ const CHALLENGE_TEXT = [
   [/access (?:to this page has been )?denied/i, 'bot-wall'],
   [/why have i been blocked/i, 'bot-wall'],
   [/ray id/i, 'cloudflare'],
+  // Chuffed's own rate limiter, served as an ordinary 200 with the payment
+  // form replaced by this sentence. Not Cloudflare, not a challenge, and not
+  // the campaign being closed — see UNCLEARABLE.
+  [/(?:noticed|detected) suspicious activity/i, 'rate-limited'],
 ];
+
+/**
+ * Gates there is no point putting a person in front of.
+ *
+ * Every other kind here is a puzzle someone at the keyboard can solve, so the
+ * assisted flow says "clear it and we'll carry on" and waits. These two are
+ * not: a rate limiter and a hard block are the site declining to serve this
+ * visitor for a while, and no amount of clicking changes that. Waiting on them
+ * spends the donor's whole timeout — five silent minutes by default — before
+ * reporting something that was knowable at once.
+ */
+const UNCLEARABLE = new Set(['rate-limited', 'blocked-status']);
+
+/**
+ * Can a person at the browser actually get past this one?
+ *
+ * @param {{kind: string}|null} gate
+ */
+export function isClearable(gate) {
+  return Boolean(gate) && !UNCLEARABLE.has(gate.kind);
+}
 
 /** Statuses that a normal campaign page never returns. */
 const BLOCKED_STATUSES = new Set([401, 403, 429, 503]);
